@@ -1,0 +1,165 @@
+--- a/vllm/model_executor/layers/quantization/mxfp4.py	2026-07-09 19:03:45.329374926 -0400
++++ b/vllm/model_executor/layers/quantization/mxfp4.py	2026-07-09 19:01:29.713957675 -0400
+@@ -632,6 +632,9 @@
+                 set_weight_attrs(newp, attrs)
+                 if pname.endswith("_scale"):
+                     newp.quant_method = "block"
++            # unified-memory hosts: convert per layer as shards land instead
++            # of staging every layer (which would OOM the shared pool)
++            moe_w2_cubit.arm_eager_build(layer, moe_w2_cubit.build_layer_planes)
+ 
+     def _setup_kernel(
+         self,
+@@ -740,9 +743,10 @@
+         # VLLM_MOE_W2: build 2-bit tensor-sym planes; skip Marlin/other backends.
+         from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
+         if moe_w2_cubit.is_w2_layer(getattr(layer, "layer_name", "")):
+-            key = len(moe_w2_cubit._LAYERS)
+-            moe_w2_cubit.build_layer_planes(layer, key)
+-            layer._moe_w2_key = key
++            if not moe_w2_cubit.eager_built(layer):
++                key = len(moe_w2_cubit._LAYERS)
++                moe_w2_cubit.build_layer_planes(layer, key)
++                layer._moe_w2_key = key
+             return
+ 
+         w13 = layer.w13_weight
+--- a/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:03:45.329323326 -0400
++++ b/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:02:03.692761309 -0400
+@@ -685,6 +685,13 @@
+                 newp = torch.nn.Parameter(p_.data.cpu(), requires_grad=False)
+                 layer.register_parameter(pname, newp)
+                 set_weight_attrs(newp, attrs)
++            # unified-memory hosts: convert per layer as shards land instead
++            # of staging every layer (which would OOM the shared pool)
++            moe_w2_cubit.arm_eager_build(
++                layer,
++                lambda l, k: moe_w2_cubit.build_layer_planes_fp8(
++                    l, k, scale_suffix=self.weight_scale_name),
++                scale_suffix=self.weight_scale_name)
+ 
+     def _setup_kernel(
+         self,
+@@ -737,10 +744,11 @@
+         from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
+         if self.block_quant and moe_w2_cubit.is_w2_layer(
+                 getattr(layer, "layer_name", "")):
+-            key = len(moe_w2_cubit._LAYERS)
+-            moe_w2_cubit.build_layer_planes_fp8(
+-                layer, key, scale_suffix=self.weight_scale_name)
+-            layer._moe_w2_key = key
++            if not moe_w2_cubit.eager_built(layer):
++                key = len(moe_w2_cubit._LAYERS)
++                moe_w2_cubit.build_layer_planes_fp8(
++                    layer, key, scale_suffix=self.weight_scale_name)
++                layer._moe_w2_key = key
+             return
+ 
+         # Allow for accessing weights and scales in standard way.
+--- a/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:03:45.329985467 -0400
++++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:01:57.018799115 -0400
+@@ -455,6 +455,104 @@
+                    "w2_weight_scale"))
+ 
+ 
++# --------------------------------------------------------------------------
++# Eager per-layer build (unified-memory hosts: DGX Spark / GB10 etc.)
++# --------------------------------------------------------------------------
++# The hooks stage ALL layers' checkpoint experts in CPU RAM and convert to
++# 2-bit planes only in process_weights_after_loading. On discrete-GPU hosts
++# that staging is free; on unified-memory hosts CPU RAM *is* the GPU memory,
++# so staging the full expert set (~137 GiB on DS4-Flash) OOMs the box before
++# conversion starts. arm_eager_build() wraps the staged params'
++# weight_loaders and builds a layer's planes the moment its last expert
++# shard lands, freeing its staging immediately — peak staging cost becomes
++# ONE layer instead of all of them.
++#
++# Default: on iff the device reports itself as integrated (unified memory);
++# override with VLLM_MOE_W2_EAGER_BUILD=0/1.
++
++_EAGER_LOCK = __import__("threading").Lock()
++_EAGER_FALLBACK_WARNED = False
++
++
++def eager_build_enabled() -> bool:
++    v = os.getenv("VLLM_MOE_W2_EAGER_BUILD")
++    if v is not None:
++        return v == "1"
++    try:
++        props = torch.cuda.get_device_properties(0)
++        return bool(getattr(props, "is_integrated", 0))
++    except Exception:
++        return False
++
++
++def _eager_key() -> int:
++    # unique per built layer; forward only needs consistency with _LAYERS
++    return len(_LAYERS)
++
++
++def arm_eager_build(layer, build_fn, scale_suffix: str = "weight_scale") -> None:
++    """Wrap the four staged params' weight_loaders; when every expert shard
++    of the layer has been written, build the planes and free the staging.
++
++    Expected loader calls per param (per-expert shard loading, the DS4/GLM
++    checkpoint layout): w13_* get 2 calls/expert (w1+w3), w2_* get 1. A
++    whole-tensor load (expert_id None) completes its param outright. If a
++    checkpoint loads in some other pattern the counts never complete and the
++    layer just falls back to process_weights_after_loading (with a one-time
++    warning: on unified memory that path can OOM)."""
++    if not eager_build_enabled():
++        return
++    E = layer.w13_weight.data.shape[0]
++    expected = {"w13_weight": 2 * E, f"w13_{scale_suffix}": 2 * E,
++                "w2_weight": E, f"w2_{scale_suffix}": E}
++    seen = {k: 0 for k in expected}
++    done = {"built": False}
++
++    def _complete() -> bool:
++        return all(seen[k] >= expected[k] for k in expected)
++
++    def _wrap(pname, inner):
++        @functools.wraps(inner)
++        def loader(param, loaded_weight, *args, **kwargs):
++            ret = inner(param, loaded_weight, *args, **kwargs)
++            # expert_id is the last positional (weight_name, shard_id,
++            # expert_id) or a kwarg, depending on caller
++            expert_id = kwargs.get("expert_id",
++                                   args[-1] if args else None)
++            with _EAGER_LOCK:
++                seen[pname] += (expected[pname] - seen[pname]
++                                if expert_id is None else 1)
++                if done["built"] or not _complete():
++                    return ret
++                done["built"] = True
++                key = _eager_key()
++            build_fn(layer, key)
++            layer._moe_w2_key = key
++            logger.info("moe_w2: layer %d planes built EAGERLY "
++                        "(staging freed at load)", key)
++            return ret
++        return loader
++
++    for pname in expected:
++        p = getattr(layer, pname)
++        if hasattr(p, "weight_loader"):
++            p.weight_loader = _wrap(pname, p.weight_loader)
++
++
++def eager_built(layer) -> bool:
++    """True if arm_eager_build already converted this layer."""
++    global _EAGER_FALLBACK_WARNED
++    if getattr(layer, "_moe_w2_key", None) is not None:
++        return True
++    if eager_build_enabled() and not _EAGER_FALLBACK_WARNED:
++        _EAGER_FALLBACK_WARNED = True
++        logger.warning(
++            "moe_w2: eager build armed but a layer completed loading "
++            "without triggering it (unexpected shard pattern?) — falling "
++            "back to build-at-end; on unified memory this may OOM")
++    return False
++
++
+ def _finish_layer(layer, layer_key, dev, planes13, sc13, planes2, sc2,
+                   N13, K13, N2, K2, E, param_names) -> None:
+     from vllm.model_executor.layers.quantization.utils import moe_w2_delta
