@@ -16,8 +16,15 @@ Uses the venv's own moe_w2_planes pack functions, so output is bit-identical
 to what build_layer_planes{,_fp8} produce at serve time.
 
 usage: prepack_planes.py --model DIR [--out DIR] [--layers 3-40]
+                         [--tp-rank R --tp-size S]
 Restartable: layers with existing outputs are skipped; layers whose shard
 files are not yet downloaded are skipped with a notice (rerun later).
+
+TP mode (--tp-rank/--tp-size): emits the rank's tensor-parallel shard,
+sliced from the raw checkpoint exactly like vLLM's FusedMoE TP loader —
+gate/up rows [r*I/S, (r+1)*I/S) (column-parallel), down K-columns in the
+same range (row-parallel). Point each rank's VLLM_MOE_W2_PREPACKED_DIR at
+its own output dir. Requires the K=I/S w2 cubins (k1024 for GLM TP2).
 """
 import argparse
 import json
@@ -52,10 +59,18 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     ap.add_argument("--layers", default=None,
                     help="inclusive range like 3-40 (default: all)")
+    ap.add_argument("--tp-rank", type=int, default=None)
+    ap.add_argument("--tp-size", type=int, default=None)
     args = ap.parse_args()
+    tp = None
+    if args.tp_size is not None:
+        assert args.tp_rank is not None and 0 <= args.tp_rank < args.tp_size
+        tp = (args.tp_rank, args.tp_size)
 
     model = os.path.expanduser(args.model)
-    out = args.out or os.path.join(model, "moe_w2_planes")
+    default_dir = ("moe_w2_planes" if tp is None
+                   else f"moe_w2_planes_tp{tp[1]}")
+    out = args.out or os.path.join(model, default_dir)
     os.makedirs(out, exist_ok=True)
     dev = torch.device("cuda")
 
@@ -112,13 +127,32 @@ def main() -> int:
         E = len(experts)
         as_bytes = fmt == "mxfp4"
 
+        def rows(t):
+            # column-parallel (gate/up): this rank's output rows.
+            # Weights and scales shard by the same fraction of dim 0.
+            if tp is None:
+                return t
+            r, s = tp
+            n = t.shape[0]
+            assert n % s == 0, (t.shape, tp)
+            return t.narrow(0, r * (n // s), n // s)
+
+        def cols(t):
+            # row-parallel (down): this rank's K slice along dim 1.
+            if tp is None:
+                return t
+            r, s = tp
+            n = t.shape[1]
+            assert n % s == 0, (t.shape, tp)
+            return t.narrow(1, r * (n // s), n // s).contiguous()
+
         def expert_w13_w2(t):
-            w13 = torch.cat((get(t["gate.weight"], as_bytes),
-                             get(t["up.weight"], as_bytes)), 0)
-            s13 = torch.cat((get(t["gate.scale"], as_bytes),
-                             get(t["up.scale"], as_bytes)), 0)
-            return (w13, s13, get(t["down.weight"], as_bytes),
-                    get(t["down.scale"], as_bytes))
+            w13 = torch.cat((rows(get(t["gate.weight"], as_bytes)),
+                             rows(get(t["up.weight"], as_bytes))), 0)
+            s13 = torch.cat((rows(get(t["gate.scale"], as_bytes)),
+                             rows(get(t["up.scale"], as_bytes))), 0)
+            return (w13, s13, cols(get(t["down.weight"], as_bytes)),
+                    cols(get(t["down.scale"], as_bytes)))
 
         w13, _, w2, _ = expert_w13_w2(experts[min(experts)])
         N13 = w13.shape[0]
@@ -146,8 +180,10 @@ def main() -> int:
         for arr, tag in ((planes13, "planes13"), (sc13, "sc13"),
                          (planes2, "planes2"), (sc2, "sc2")):
             np.save(f"{dst}.{tag}.npy", arr)
-        json.dump(dict(E=E, N13=N13, K13=K13, N2=N2, K2=K2),
-                  open(dst + ".meta.json", "w"))
+        meta = dict(E=E, N13=N13, K13=K13, N2=N2, K2=K2)
+        if tp is not None:
+            meta["tp_rank"], meta["tp_size"] = tp
+        json.dump(meta, open(dst + ".meta.json", "w"))
         torch.cuda.empty_cache()
         print(f"layer {li}: packed E={E} "
               f"({(planes13.nbytes+sc13.nbytes+planes2.nbytes+sc2.nbytes)>>20}"

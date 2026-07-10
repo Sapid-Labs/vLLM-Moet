@@ -11,12 +11,16 @@
 set -euo pipefail
 VENV="$HOME/venvs/vllm-moet"
 
-COMMON="VLLM_MTP_TRACE=1 RAY_memory_monitor_refresh_ms=0 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
+# Node truths ONLY (fabric + memory knobs). Config-specific vars — the
+# VLLM_MOE_W2_* family, spec/trace toggles — must NOT be baked here: ray
+# workers apply the raylet env over driver-forwarded env (setdefault
+# semantics: node-local values always win), so a stale raylet value
+# silently overrides whatever the serve script exports. That bit us on
+# 2026-07-10: TP2 workers loaded the PP planes dir baked into the raylet
+# and computed garbage. Serve-script env reaches workers via the driver
+# forwarding as long as the raylet doesn't shadow it.
+COMMON="RAY_memory_monitor_refresh_ms=0 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
 NCCL_SOCKET_IFNAME=enp1s0f1np1 GLOO_SOCKET_IFNAME=enp1s0f1np1 \
-VLLM_MOE_W2=1 VLLM_MOE_W2_DELTA_GB=0 \
-VLLM_MOE_W2_CUBIT_DIR=\$HOME/Dev/vLLM-Moet/kernels/cubins-sm120 \
-VLLM_MOE_W2_PREPACKED_DIR=\$HOME/models/hf/GLM-5.2-FP8/moe_w2_planes \
-VLLM_MOE_W2_FADVISE_GLOB='\$HOME/models/hf/GLM-5.2-FP8/*.safetensors' \
 MALLOC_MMAP_THRESHOLD_=65536"
 
 echo "== stopping any old ray =="
