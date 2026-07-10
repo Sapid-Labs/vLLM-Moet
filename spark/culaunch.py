@@ -27,8 +27,11 @@ class Cuda:
         self.dev = ctypes.c_int()
         _ck(_cuda.cuDeviceGet(ctypes.byref(self.dev), device), "cuDeviceGet")
         self.ctx = ctypes.c_void_p()
-        # cuCtxCreate_v2(ctx, flags, dev) — stable ABI symbol
-        _ck(_cuda.cuCtxCreate_v2(ctypes.byref(self.ctx), 0, self.dev), "cuCtxCreate")
+        # primary context, NOT a private one: scripts that also use torch.cuda
+        # (e.g. the pack helpers) must share a context or handles go invalid
+        _ck(_cuda.cuDevicePrimaryCtxRetain(ctypes.byref(self.ctx), self.dev),
+            "cuDevicePrimaryCtxRetain")
+        _ck(_cuda.cuCtxSetCurrent(self.ctx), "cuCtxSetCurrent")
         self._mods = []
 
     def load_kernel(self, cubin_path, kernel_name):

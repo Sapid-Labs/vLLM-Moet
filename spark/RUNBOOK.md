@@ -9,10 +9,10 @@ CUDA 13, driver 580.159.03).
 - DeepSeek-V4-Flash, 1 Spark: **working** — coherent greedy output,
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
 - GLM-5.2, 2 Sparks (PP2): **working** — correct greedy reasoning/arithmetic,
-  ~4 tok/s single-stream warm (eager, no MTP, no CUDA graphs — both are
-  untapped; upstream saw 4.7x from graphs on GLM). First requests after a
-  cold start run slower while the kernel faults 190 GiB of planes in from
-  NVMe.
+  ~4-5 tok/s single-stream and **13-15 tok/s aggregate at 8 streams** (CUDA
+  graphs on, batch scaling near-linear to 4). Single-stream is bounded by
+  the PP bubble; run `spark/warm-planes.sh` after startup to avoid slow
+  first requests (plane faults from NVMe).
 
 Background reading: `spark/README.md` (port notes) and the "unified-memory
 load war" section of the How To Spark lab notes — six GB10-specific memory
@@ -149,8 +149,12 @@ What the scripts encode (don't skip these if you roll your own):
 
 - Eager mode only so far; CUDA-graph mode untested on GB10 (expect modest
   gains — decode is bandwidth-bound and MTP already hides launch latency).
-- GLM PP2 runs without MTP (the drafter's experts don't fit rank 1's
-  budget); an uneven-partition + MTP config is future work.
+- GLM PP2 runs without MTP: we unlocked the drafter under PP (SupportsPP on
+  the generic DeepSeekMTP + the patch's cross-rank embed share) and drafts
+  were accepted — but output was corrupted in both graph and eager modes.
+  The GLM verify path under PP is unvalidated upstream (their bit-exactness
+  work covered the DS4 drafter only). Reverted; this is the main remaining
+  single-stream lever (~2x).
 - 8K context configs; KV is tiny (MLA), so longer windows are mostly a
   matter of raising `--kv-cache-memory-bytes` and `--max-model-len`.
 - 2-bit quality: upstream's QUANT_PROBE numbers (MTP acceptance ≥ FP4

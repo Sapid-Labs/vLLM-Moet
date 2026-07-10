@@ -33,7 +33,7 @@ export NCCL_IB_DISABLE=1   # PP boundary traffic is one 6144-vector/token; TCP i
 
 # 78 layers: rank0 carries embeddings + 3 dense layers; give rank1 one more
 # MoE layer only if memory tilts. Start even.
-export VLLM_PP_LAYER_PARTITION="38,40"
+export VLLM_PP_LAYER_PARTITION="40,38"
 
 ARGS=(
   --served-model-name glm-5.2 --trust-remote-code
@@ -44,7 +44,7 @@ ARGS=(
   # which overrides the util-derived budget.
   --gpu-memory-utilization 0.85
   --kv-cache-memory-bytes 2147483648
-  --max-num-batched-tokens 512 --max-num-seqs 2
+  --max-num-batched-tokens 512 --max-num-seqs 8
   --host 0.0.0.0 --port 8000
 )
 
