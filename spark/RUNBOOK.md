@@ -9,10 +9,10 @@ CUDA 13, driver 580.159.03).
 - DeepSeek-V4-Flash, 1 Spark: **working** — coherent greedy output,
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
 - GLM-5.2, 2 Sparks (PP2): **working** — correct greedy reasoning/arithmetic,
-  ~4-5 tok/s single-stream and **13-15 tok/s aggregate at 8 streams** (CUDA
-  graphs on, batch scaling near-linear to 4). Single-stream is bounded by
-  the PP bubble; run `spark/warm-planes.sh` after startup to avoid slow
-  first requests (plane faults from NVMe).
+  ~5.5 tok/s single-stream and **~17 tok/s aggregate at 8 streams** (CUDA
+  graphs + NCCL over RoCE; batch scaling near-linear to 4). Single-stream
+  is bounded by the PP bubble; run `spark/warm-planes.sh` after startup to
+  avoid slow first requests (plane faults from NVMe).
 
 Background reading: `spark/README.md` (port notes) and the "unified-memory
 load war" section of the How To Spark lab notes — six GB10-specific memory
@@ -28,8 +28,12 @@ this; the scripts encode all of it.
   IPs (this guide assumes `.1` = head, `.2` = peer on `192.168.100.0/24`)
   and passwordless SSH both ways
 - Disk per node: ~230 GiB for DS4-Flash (+planes), ~900 GiB for GLM-5.2
-- No root needed (one caveat: your user must be able to run `systemd-run
-  --user`, true by default)
+- No root needed to serve — but for full speed, one root one-liner: DGX OS
+  ships an 8 MB `memlock` limit that breaks NCCL-over-RDMA (`ibv_reg_mr:
+  Cannot allocate memory` -> "unhandled system error"). Fix:
+  `sudo tee /etc/security/limits.d/99-rdma-memlock.conf <<< $'youruser soft memlock unlimited\nyouruser hard memlock unlimited'`
+  (applies to NEW login sessions; the cluster script self-SSHes for this
+  reason). Without it the scripts still work over TCP, ~15% slower.
 
 ## 1. Install (each node, or install once and rsync)
 
@@ -128,7 +132,7 @@ What the scripts encode (don't skip these if you roll your own):
 | `--kv-cache-memory-bytes 2G` + util 0.85 | vLLM's KV budget math counts system-wide usage on GB10; pin KV explicitly |
 | `VLLM_PP_LAYER_PARTITION=38,40` | the head node also hosts the driver/desktop — give the peer the heavier half |
 | `systemd-run --scope -p MemoryMax=…` | contained failure: per-node commitments must sum **below** 121 GiB or a global OOM takes the desktop down |
-| `NCCL_IB_DISABLE=1` + `*_SOCKET_IFNAME` | TCP over the 200G link; PP moves one hidden-vector per token, RoCE tuning not worth it |
+| NCCL over RoCE (`NCCL_IB_HCA` + per-node `NCCL_IB_GID_INDEX`) | decode profiling showed most single-stream wall in comm/wait; RoCE beats TCP ~15%. Needs the memlock fix above |
 | raylets from **login shells** | Ray actors inherit the raylet's PATH — flashinfer JIT needs `ninja`/`nvcc` |
 
 ## 5. Troubleshooting

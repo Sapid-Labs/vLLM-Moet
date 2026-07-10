@@ -19,7 +19,8 @@ export VLLM_MOE_W2_CUBIT_DIR="$REPO/kernels/cubins-sm120"
 export VLLM_MOE_W2_PREPACKED_DIR="$MODEL/moe_w2_planes"
 # planes stay file-backed (page cache): kernel evicts cold experts under
 # pressure — the two ranks' anon footprints finally sum under 2x121 GiB
-export VLLM_MOE_W2_PLANES_MMAP=1
+export VLLM_MOE_W2_PLANES_MMAP=1  # file-backed planes (anon/THP does not fit:
+                                  # nodes cap at 70 of 75 layers)
 export VLLM_MOE_W2_FADVISE_GLOB="$MODEL/*.safetensors"
 export MALLOC_MMAP_THRESHOLD_=65536
 
@@ -29,7 +30,9 @@ export VLLM_HOST_IP=192.168.100.1
 export NCCL_SOCKET_IFNAME=enp1s0f1np1
 export GLOO_SOCKET_IFNAME=enp1s0f1np1
 export RAY_memory_monitor_refresh_ms=0
-export NCCL_IB_DISABLE=1   # PP boundary traffic is one 6144-vector/token; TCP is fine
+export NCCL_IB_DISABLE=0   # RoCE: trace showed 71% of decode wall in comm/wait on TCP
+export NCCL_IB_HCA=rocep1s0f1
+export NCCL_IB_GID_INDEX=3   # .1's RoCEv2 GID (peer uses 5, set on its raylet)
 
 # 78 layers: rank0 carries embeddings + 3 dense layers; give rank1 one more
 # MoE layer only if memory tilts. Start even.
