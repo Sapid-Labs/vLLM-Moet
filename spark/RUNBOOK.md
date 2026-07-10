@@ -8,8 +8,11 @@ CUDA 13, driver 580.159.03).
 **Status (2026-07-10):**
 - DeepSeek-V4-Flash, 1 Spark: **working** — coherent greedy output,
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
-- GLM-5.2, 2 Sparks (PP2): bring-up in progress — this guide is updated as
-  it lands
+- GLM-5.2, 2 Sparks (PP2): **working** — correct greedy reasoning/arithmetic,
+  ~4 tok/s single-stream warm (eager, no MTP, no CUDA graphs — both are
+  untapped; upstream saw 4.7x from graphs on GLM). First requests after a
+  cold start run slower while the kernel faults 190 GiB of planes in from
+  NVMe.
 
 Background reading: `spark/README.md` (port notes) and the "unified-memory
 load war" section of the How To Spark lab notes — six GB10-specific memory
