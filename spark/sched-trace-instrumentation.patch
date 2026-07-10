@@ -1,0 +1,163 @@
+--- a/vllm/v1/core/sched/scheduler.py	2026-07-10 16:03:59.925125343 -0400
++++ b/vllm/v1/core/sched/scheduler.py	2026-07-10 15:20:49.808481589 -0400
+@@ -64,6 +64,18 @@
+ 
+ logger = init_logger(__name__)
+ 
++# --- MTP-under-PP debug trace (VLLM_SCHED_TRACE=<path>) ---
++import os as _os  # noqa: E402
++
++_SCHED_TRACE_PATH = _os.environ.get("VLLM_SCHED_TRACE", "")
++
++
++def _strace(msg: str) -> None:
++    if _SCHED_TRACE_PATH:
++        with open(_SCHED_TRACE_PATH, "a") as _f:
++            _f.write(f"{time.monotonic():.4f} {msg}\n")
++# --- end debug trace ---
++
+ 
+ class Scheduler(SchedulerInterface):
+     def __init__(
+@@ -481,6 +493,21 @@
+                 + request.num_output_placeholders
+                 - request.num_computed_tokens
+             )
++            if _SCHED_TRACE_PATH:
++                _strace(
++                    f"SCH step={self.current_step} req={request.request_id[-8:]}"
++                    f" ntok={request.num_tokens}"
++                    f" ntws={request.num_tokens_with_spec}"
++                    f" comp={request.num_computed_tokens}"
++                    f" ph={request.num_output_placeholders}"
++                    f" spec={len(request.spec_token_ids)}"
++                    f" new={num_new_tokens}"
++                )
++                if num_new_tokens < 0:
++                    _strace(
++                        f"SCH-NEGATIVE step={self.current_step}"
++                        f" req={request.request_id[-8:]} new={num_new_tokens}"
++                    )
+             if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
+                 num_new_tokens = self.scheduler_config.long_prefill_token_threshold
+             num_new_tokens = min(num_new_tokens, token_budget)
+@@ -603,6 +630,13 @@
+                     - request.num_tokens
+                     - request.num_output_placeholders
+                 )
++                if _SCHED_TRACE_PATH:
++                    _strace(
++                        f"SCHSPEC step={self.current_step}"
++                        f" req={request.request_id[-8:]}"
++                        f" nss={num_scheduled_spec_tokens}"
++                        f" avail={len(request.spec_token_ids)}"
++                    )
+                 if num_scheduled_spec_tokens > 0:
+                     spec_token_ids = request.spec_token_ids
+                     if len(spec_token_ids) > num_scheduled_spec_tokens:
+@@ -1163,6 +1197,12 @@
+             request.is_prefill_chunk = request.num_computed_tokens < (
+                 request.num_tokens + request.num_output_placeholders
+             )
++            if _SCHED_TRACE_PATH:
++                _strace(
++                    f"ADV step={self.current_step} req={req_id[-8:]}"
++                    f" +{num_scheduled_token} comp={request.num_computed_tokens}"
++                    f" chunk={request.is_prefill_chunk}"
++                )
+             scheduler_output.has_structured_output_requests |= (
+                 request.use_structured_output and not request.is_prefill_chunk
+             )
+@@ -1564,6 +1604,14 @@
+             scheduled_spec_token_ids = (
+                 scheduler_output.scheduled_spec_decode_tokens.get(req_id)
+             )
++            if _SCHED_TRACE_PATH and scheduled_spec_token_ids:
++                if not (generated_token_ids or self.num_sampled_tokens_per_step == 0):
++                    _strace(
++                        f"RECON-SKIP step={self.current_step} req={req_id[-8:]}"
++                        f" draft={len(scheduled_spec_token_ids)} gen=0"
++                        f" comp={request.num_computed_tokens}"
++                        f" ph={request.num_output_placeholders}"
++                    )
+             if scheduled_spec_token_ids and (
+                 generated_token_ids or self.num_sampled_tokens_per_step == 0
+             ):
+@@ -1571,6 +1619,15 @@
+                 num_sampled = self.num_sampled_tokens_per_step
+                 num_accepted = max(len(generated_token_ids) - num_sampled, 0)
+                 num_rejected = num_draft_tokens - num_accepted
++                if _SCHED_TRACE_PATH:
++                    _strace(
++                        f"RECON step={self.current_step} req={req_id[-8:]}"
++                        f" draft={num_draft_tokens} gen={len(generated_token_ids)}"
++                        f" acc={num_accepted} rej={num_rejected}"
++                        f" comp={request.num_computed_tokens}"
++                        f" ph={request.num_output_placeholders}"
++                        f" discard={request.async_tokens_to_discard}"
++                    )
+                 # num_computed_tokens represents the number of tokens
+                 # processed in the current step, considering scheduled
+                 # tokens and rejections. If some tokens are rejected,
+@@ -1968,6 +2025,11 @@
+             if num_invalid_tokens:
+                 spec_token_ids.extend([-1] * num_invalid_tokens)
+                 num_invalid_spec_tokens[req_id] = num_invalid_tokens
++            if _SCHED_TRACE_PATH:
++                _strace(
++                    f"DRAFT req={req_id[-8:]} sched={orig_num_spec_tokens}"
++                    f" invalid={num_invalid_tokens}"
++                )
+ 
+             sched_spec_tokens[req_id] = spec_token_ids
+ 
+--- a/vllm/v1/core/sched/async_scheduler.py	2026-07-10 16:03:59.927814832 -0400
++++ b/vllm/v1/core/sched/async_scheduler.py	2026-07-10 15:07:45.207142730 -0400
+@@ -3,7 +3,7 @@
+ 
+ from vllm.logger import init_logger
+ from vllm.v1.core.sched.output import SchedulerOutput
+-from vllm.v1.core.sched.scheduler import Scheduler
++from vllm.v1.core.sched.scheduler import Scheduler, _SCHED_TRACE_PATH, _strace
+ from vllm.v1.request import Request, RequestStatus
+ 
+ logger = init_logger(__name__)
+@@ -39,6 +39,13 @@
+             request.num_output_placeholders += (
+                 self.num_sampled_tokens_per_step + cur_num_spec_tokens
+             )
++            if _SCHED_TRACE_PATH:
++                _strace(
++                    f"PH+ step={self.current_step} req={req_id[-8:]}"
++                    f" +{self.num_sampled_tokens_per_step + cur_num_spec_tokens}"
++                    f" ph={request.num_output_placeholders}"
++                    f" next_elig={request.next_decode_eligible_step if self.use_v2_model_runner else -1}"
++                )
+             # Add placeholders for the new draft/spec tokens.
+             # We will update the actual spec token ids in the worker process.
+             request.spec_token_ids = self._spec_token_placeholders
+@@ -56,6 +63,11 @@
+             # stale in-flight async output frame per call until the counter
+             # is drained.
+             request.async_tokens_to_discard -= 1
++            if _SCHED_TRACE_PATH:
++                _strace(
++                    f"DISCARD req={request.request_id[-8:]}"
++                    f" remaining={request.async_tokens_to_discard}"
++                )
+             return [], False
+ 
+         status_before_update = request.status
+@@ -65,6 +77,12 @@
+ 
+         # Update the number of output placeholders.
+         request.num_output_placeholders -= len(new_token_ids)
++        if _SCHED_TRACE_PATH:
++            _strace(
++                f"OUT req={request.request_id[-8:]} new={len(new_token_ids)}"
++                f" ph={request.num_output_placeholders}"
++                f" ntok={request.num_tokens} stopped={stopped}"
++            )
+         assert request.num_output_placeholders >= 0
+ 
+         # Cache the new tokens. Preempted requests should be skipped.

@@ -46,6 +46,11 @@ git clone -b spark-gb10 https://github.com/Sapid-Labs/vLLM-Moet ~/Dev/vLLM-Moet
 cd ~/venvs/vllm-moet/lib/python3.12/site-packages
 git apply ~/Dev/vLLM-Moet/patch/vllm-moet-v0.24.0.patch          # upstream patch
 git apply ~/Dev/vLLM-Moet/spark/spark-unified-memory.patch       # this port
+git apply ~/Dev/vLLM-Moet/spark/sync-pp-spec-sched-fix.patch     # stock-0.24 bug:
+#   sync-sched + PP + spec races draft delivery against in-flight steps ->
+#   negative num_scheduled_tokens -> worker assert. Repro/regression test:
+#   spark/test_sync_pp_spec.py. Optional per-step scheduler tracing for
+#   debugging: spark/sched-trace-instrumentation.patch (VLLM_SCHED_TRACE=<path>).
 
 # dep pins (see docs/v024-port.md for why)
 ~/venvs/vllm-moet/bin/pip uninstall -y flashinfer-cubin
@@ -153,12 +158,19 @@ What the scripts encode (don't skip these if you roll your own):
 
 - Eager mode only so far; CUDA-graph mode untested on GB10 (expect modest
   gains — decode is bandwidth-bound and MTP already hides launch latency).
-- GLM PP2 runs without MTP: we unlocked the drafter under PP (SupportsPP on
-  the generic DeepSeekMTP + the patch's cross-rank embed share) and drafts
-  were accepted — but output was corrupted in both graph and eager modes.
-  The GLM verify path under PP is unvalidated upstream (their bit-exactness
-  work covered the DS4 drafter only). Reverted; this is the main remaining
-  single-stream lever (~2x).
+- GLM PP2 runs without MTP — **by choice, not defect** (settled 2026-07-10):
+  MTP-under-PP works (drafter loads on rank 1, drafts accepted at ~2.2/2+1,
+  long prompts complete once the planes are warm), but it is a net
+  *slowdown* here: 3.65 tok/s with MTP k=2 vs 4.9-5.5 without. The verify
+  step computes 3 positions whose top-8 routes hit mostly-distinct experts,
+  so the weight-read-bound moe_w2 path pays ~3x traffic for ~2.2x tokens
+  (upstream's 2x gain assumed VRAM-resident weights). Note when measuring:
+  `bench_decode.py` counts SSE frames — spec configs bundle tokens per
+  frame; use `usage.completion_tokens` differentials.
+- Cold long-prompt TTFT is minutes: each 512-token prefill chunk touches
+  nearly all experts (~95 GiB/rank of plane faults from NVMe, ~150 s/chunk
+  cold). Run `spark/warm-planes.sh` after any cache purge; don't mistake a
+  cold prefill for a hang (it was misdiagnosed as an MTP defect for a day).
 - 8K context configs; KV is tiny (MLA), so longer windows are mostly a
   matter of raising `--kv-cache-memory-bytes` and `--max-model-len`.
 - 2-bit quality: upstream's QUANT_PROBE numbers (MTP acceptance ≥ FP4

@@ -1,0 +1,25 @@
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -460,6 +460,22 @@
+                 req_index += 1
+                 continue
+ 
++            if (
++                not self.scheduler_config.async_scheduling
++                and self.use_pp
++                and request.num_computed_tokens >= request.num_tokens
++            ):
++                # Sync scheduling + PP: every known token is already scheduled
++                # and the last step's output has not been processed yet.
++                # Draft tokens delivered asynchronously via
++                # update_draft_token_ids may have inflated num_tokens_with_spec
++                # in this window; scheduling them now would place them at
++                # positions whose input token has not been sampled yet and
++                # later drive num_new_tokens negative. Wait for the in-flight
++                # step's output instead.
++                req_index += 1
++                continue
++
+             num_new_tokens = (
+                 request.num_tokens_with_spec
+                 + request.num_output_placeholders
