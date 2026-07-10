@@ -11,7 +11,7 @@
 set -euo pipefail
 VENV="$HOME/venvs/vllm-moet"
 
-COMMON="RAY_memory_monitor_refresh_ms=0 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
+COMMON="VLLM_MTP_TRACE=1 RAY_memory_monitor_refresh_ms=0 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
 NCCL_SOCKET_IFNAME=enp1s0f1np1 GLOO_SOCKET_IFNAME=enp1s0f1np1 \
 VLLM_MOE_W2=1 VLLM_MOE_W2_DELTA_GB=0 \
 VLLM_MOE_W2_CUBIT_DIR=\$HOME/Dev/vLLM-Moet/kernels/cubins-sm120 \
