@@ -61,8 +61,26 @@
  
          w13 = layer.w13_weight
 --- a/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:03:45.329323326 -0400
-+++ b/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:11:54.020435304 -0400
-@@ -682,9 +682,21 @@
++++ b/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 22:23:04.262500466 -0400
+@@ -678,13 +678,39 @@
+         from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
+         if self.block_quant and moe_w2_cubit.is_w2_layer(
+                 getattr(layer, "layer_name", "")):
++            _pp = moe_w2_cubit.prepacked_path(
++                getattr(layer, "layer_name", ""))
++            if _pp is not None:
++                # planes come prepacked from disk: skip staging entirely and
++                # discard the checkpoint expert bytes at load
++                layer._moe_w2_prepacked = _pp
++                for pname in ("w13_weight", f"w13_{self.weight_scale_name}",
++                              "w2_weight", f"w2_{self.weight_scale_name}"):
++                    newp = torch.nn.Parameter(
++                        torch.empty(0, dtype=torch.uint8),
++                        requires_grad=False)
++                    newp.weight_loader = moe_w2_cubit.noop_weight_loader
++                    layer.register_parameter(pname, newp)
++                return
+             for pname in ("w13_weight", f"w13_{self.weight_scale_name}",
                            "w2_weight", f"w2_{self.weight_scale_name}"):
                  p_ = getattr(layer, pname)
                  attrs = dict(p_.__dict__)  # weight_loader, quant_method, ...
@@ -85,7 +103,7 @@
  
      def _setup_kernel(
          self,
-@@ -737,10 +749,11 @@
+@@ -737,10 +763,17 @@
          from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
          if self.block_quant and moe_w2_cubit.is_w2_layer(
                  getattr(layer, "layer_name", "")):
@@ -93,7 +111,13 @@
 -            moe_w2_cubit.build_layer_planes_fp8(
 -                layer, key, scale_suffix=self.weight_scale_name)
 -            layer._moe_w2_key = key
-+            if not moe_w2_cubit.eager_built(layer):
++            _pp = getattr(layer, "_moe_w2_prepacked", None)
++            if _pp is not None:
++                key = len(moe_w2_cubit._LAYERS)
++                moe_w2_cubit.load_prepacked_layer(
++                    layer, key, _pp, scale_suffix=self.weight_scale_name)
++                layer._moe_w2_key = key
++            elif not moe_w2_cubit.eager_built(layer):
 +                key = len(moe_w2_cubit._LAYERS)
 +                moe_w2_cubit.build_layer_planes_fp8(
 +                    layer, key, scale_suffix=self.weight_scale_name)
@@ -102,7 +126,7 @@
  
          # Allow for accessing weights and scales in standard way.
 --- a/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:03:45.329985467 -0400
-+++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 22:11:38.005778808 -0400
++++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 22:23:29.442471653 -0400
 @@ -244,10 +244,10 @@
      from vllm.model_executor.layers.quantization.utils import moe_w2_delta
      _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
@@ -217,7 +241,7 @@
          for i in range(e1 - e0):
              codes, sbytes, nib = nvfp4_to_codes_scales(
                  wg[i], sg[i], s2g[i], group=group,
-@@ -455,6 +455,281 @@
+@@ -455,6 +455,282 @@
                     "w2_weight_scale"))
  
  
@@ -314,7 +338,8 @@
 +    return True if kwargs.get("return_success") else None
 +
 +
-+def load_prepacked_layer(layer, key: int, prefix: str) -> None:
++def load_prepacked_layer(layer, key: int, prefix: str,
++                         scale_suffix: str = "weight_scale") -> None:
 +    import json as _json
 +    import numpy as _np
 +    assert _ensure_ready(), "moe_w2 cubins missing"
@@ -332,8 +357,8 @@
 +    planes13, sc13, planes2, sc2 = outs
 +    _finish_layer(layer, key, dev, planes13, sc13, planes2, sc2,
 +                  N13, K13, N2, K2, E,
-+                  ("w13_weight", "w13_weight_scale", "w2_weight",
-+                   "w2_weight_scale"))
++                  ("w13_weight", f"w13_{scale_suffix}", "w2_weight",
++                   f"w2_{scale_suffix}"))
 +    logger.info("moe_w2: layer %d planes loaded PREPACKED from %s", key,
 +                os.path.basename(prefix))
 +
@@ -499,7 +524,7 @@
  def _finish_layer(layer, layer_key, dev, planes13, sc13, planes2, sc2,
                    N13, K13, N2, K2, E, param_names) -> None:
      from vllm.model_executor.layers.quantization.utils import moe_w2_delta
-@@ -493,10 +768,21 @@
+@@ -493,10 +769,21 @@
          N13=N13, K13=K13, N2=N2, K2=K2, E=E,
      )
      # Release checkpoint copies; keep CUDA stubs so device probes stay happy.
