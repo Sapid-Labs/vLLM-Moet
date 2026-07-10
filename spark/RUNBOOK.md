@@ -35,7 +35,7 @@ this; the scripts encode all of it.
 python3.12 -m venv ~/venvs/vllm-moet
 ~/venvs/vllm-moet/bin/pip install vllm==0.24.0 "ray[default]==2.56.0"
 
-git clone https://github.com/kacper-daftcode/vLLM-Moet ~/Dev/vLLM-Moet
+git clone -b spark-gb10 https://github.com/Sapid-Labs/vLLM-Moet ~/Dev/vLLM-Moet
 cd ~/venvs/vllm-moet/lib/python3.12/site-packages
 git apply ~/Dev/vLLM-Moet/patch/vllm-moet-v0.24.0.patch          # upstream patch
 git apply ~/Dev/vLLM-Moet/spark/spark-unified-memory.patch       # this port
