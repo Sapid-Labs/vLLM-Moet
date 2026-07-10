@@ -1,6 +1,37 @@
 --- a/vllm/model_executor/layers/quantization/mxfp4.py	2026-07-09 19:03:45.329374926 -0400
-+++ b/vllm/model_executor/layers/quantization/mxfp4.py	2026-07-09 19:01:29.713957675 -0400
-@@ -632,6 +632,9 @@
++++ b/vllm/model_executor/layers/quantization/mxfp4.py	2026-07-09 21:49:21.211377002 -0400
+@@ -622,16 +622,39 @@
+         # in process_weights_after_loading.
+         from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
+         if moe_w2_cubit.is_w2_layer(getattr(layer, "layer_name", "")):
++            _pp = moe_w2_cubit.prepacked_path(
++                getattr(layer, "layer_name", ""))
++            if _pp is not None:
++                # planes come prepacked from disk: skip staging entirely and
++                # discard the checkpoint expert bytes at load
++                layer._moe_w2_prepacked = _pp
++                for pname in ("w13_weight", "w13_weight_scale", "w2_weight",
++                              "w2_weight_scale"):
++                    newp = torch.nn.Parameter(
++                        torch.empty(0, dtype=torch.uint8),
++                        requires_grad=False)
++                    newp.weight_loader = moe_w2_cubit.noop_weight_loader
++                    layer.register_parameter(pname, newp)
++                return
+             for pname in ("w13_weight", "w13_weight_scale", "w2_weight",
+                           "w2_weight_scale"):
+                 p_ = getattr(layer, pname)
+                 attrs = {k: getattr(p_, k) for k in ("weight_loader",)
+                          if hasattr(p_, k)}
+-                newp = torch.nn.Parameter(p_.data.cpu(), requires_grad=False)
++                # torch.empty, NOT .data.cpu(): the checkpoint overwrites
++                # every byte, and an untouched empty CPU buffer stays virtual
++                # — on unified-memory hosts the eager .cpu() zero-copy would
++                # commit the full expert set (~137 GiB) at CONSTRUCTION time.
++                newp = torch.nn.Parameter(
++                    torch.empty(p_.shape, dtype=p_.dtype, device="cpu"),
++                    requires_grad=False)
+                 layer.register_parameter(pname, newp)
                  set_weight_attrs(newp, attrs)
                  if pname.endswith("_scale"):
                      newp.quant_method = "block"
@@ -10,14 +41,19 @@
  
      def _setup_kernel(
          self,
-@@ -740,9 +743,10 @@
+@@ -740,9 +763,15 @@
          # VLLM_MOE_W2: build 2-bit tensor-sym planes; skip Marlin/other backends.
          from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
          if moe_w2_cubit.is_w2_layer(getattr(layer, "layer_name", "")):
 -            key = len(moe_w2_cubit._LAYERS)
 -            moe_w2_cubit.build_layer_planes(layer, key)
 -            layer._moe_w2_key = key
-+            if not moe_w2_cubit.eager_built(layer):
++            _pp = getattr(layer, "_moe_w2_prepacked", None)
++            if _pp is not None:
++                key = len(moe_w2_cubit._LAYERS)
++                moe_w2_cubit.load_prepacked_layer(layer, key, _pp)
++                layer._moe_w2_key = key
++            elif not moe_w2_cubit.eager_built(layer):
 +                key = len(moe_w2_cubit._LAYERS)
 +                moe_w2_cubit.build_layer_planes(layer, key)
 +                layer._moe_w2_key = key
@@ -25,9 +61,18 @@
  
          w13 = layer.w13_weight
 --- a/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:03:45.329323326 -0400
-+++ b/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:02:03.692761309 -0400
-@@ -685,6 +685,13 @@
-                 newp = torch.nn.Parameter(p_.data.cpu(), requires_grad=False)
++++ b/vllm/model_executor/layers/quantization/fp8.py	2026-07-09 19:11:54.020435304 -0400
+@@ -682,9 +682,21 @@
+                           "w2_weight", f"w2_{self.weight_scale_name}"):
+                 p_ = getattr(layer, pname)
+                 attrs = dict(p_.__dict__)  # weight_loader, quant_method, ...
+-                newp = torch.nn.Parameter(p_.data.cpu(), requires_grad=False)
++                # torch.empty, NOT .data.cpu() — see mxfp4.py: the eager zero
++                # copy commits the full expert set at construction, which
++                # OOMs unified-memory hosts.
++                newp = torch.nn.Parameter(
++                    torch.empty(p_.shape, dtype=p_.dtype, device="cpu"),
++                    requires_grad=False)
                  layer.register_parameter(pname, newp)
                  set_weight_attrs(newp, attrs)
 +            # unified-memory hosts: convert per layer as shards land instead
@@ -40,7 +85,7 @@
  
      def _setup_kernel(
          self,
-@@ -737,10 +744,11 @@
+@@ -737,10 +749,11 @@
          from vllm.model_executor.layers.quantization.utils import moe_w2_cubit
          if self.block_quant and moe_w2_cubit.is_w2_layer(
                  getattr(layer, "layer_name", "")):
@@ -57,11 +102,242 @@
  
          # Allow for accessing weights and scales in standard way.
 --- a/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:03:45.329985467 -0400
-+++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:01:57.018799115 -0400
-@@ -455,6 +455,104 @@
++++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 22:11:38.005778808 -0400
+@@ -244,10 +244,10 @@
+     from vllm.model_executor.layers.quantization.utils import moe_w2_delta
+     _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
+ 
+-    planes13 = torch.empty(E, N13 * K13 // 4, dtype=torch.uint8, device=dev)
+-    sc13 = torch.empty(E, N13 * K13 // 32, dtype=torch.uint8, device=dev)
+-    planes2 = torch.empty(E, N2 * K2 // 4, dtype=torch.uint8, device=dev)
+-    sc2 = torch.empty(E, N2 * K2 // 32, dtype=torch.uint8, device=dev)
++    planes13 = _plane_alloc(E, N13 * K13 // 4, dev)
++    sc13 = _plane_alloc(E, N13 * K13 // 32, dev)
++    planes2 = _plane_alloc(E, N2 * K2 // 4, dev)
++    sc2 = _plane_alloc(E, N2 * K2 // 32, dev)
+ 
+     from vllm.model_executor.layers.quantization.utils.moe_w2_planes import (
+         mxfp4_to_nibbles, pack_fp4_fragment_major)
+@@ -265,16 +265,16 @@
+     chunk = 32
+     for e0 in range(0, E, chunk):
+         e1 = min(e0 + chunk, E)
+-        wg = w13[e0:e1].to(dev, non_blocking=True)
+-        sg = s13[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w13[e0:e1], dev)
++        sg = _h2d(s13[e0:e1], dev)
+         for i in range(e1 - e0):
+             nib = mxfp4_to_nibbles(wg[i])
+             planes13[e0 + i] = pack_fragment_major(mxfp4_to_codes(wg[i]))
+             sc13[e0 + i] = pack_scales(sg[i])
+             if fp13 is not None:
+                 fp13[e0 + i] = pack_fp4_fragment_major(nib)
+-        wg = w2[e0:e1].to(dev, non_blocking=True)
+-        sg = s2[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w2[e0:e1], dev)
++        sg = _h2d(s2[e0:e1], dev)
+         for i in range(e1 - e0):
+             nib = mxfp4_to_nibbles(wg[i])
+             planes2[e0 + i] = pack_fragment_major(mxfp4_to_codes(wg[i]))
+@@ -322,10 +322,10 @@
+     _, N2, K2 = w2.shape
+     _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
+ 
+-    planes13 = torch.empty(E, N13 * K13 // 4, dtype=torch.uint8, device=dev)
+-    sc13 = torch.empty(E, N13 * K13 // 32, dtype=torch.uint8, device=dev)
+-    planes2 = torch.empty(E, N2 * K2 // 4, dtype=torch.uint8, device=dev)
+-    sc2 = torch.empty(E, N2 * K2 // 32, dtype=torch.uint8, device=dev)
++    planes13 = _plane_alloc(E, N13 * K13 // 4, dev)
++    sc13 = _plane_alloc(E, N13 * K13 // 32, dev)
++    planes2 = _plane_alloc(E, N2 * K2 // 4, dev)
++    sc2 = _plane_alloc(E, N2 * K2 // 32, dev)
+ 
+     tier = moe_w2_delta.get_tier(n_experts=E, dev=dev,
+                                  w13_bytes=N13 * K13 // 2,
+@@ -340,8 +340,8 @@
+     chunk = 8
+     for e0 in range(0, E, chunk):
+         e1 = min(e0 + chunk, E)
+-        wg = w13[e0:e1].to(dev, non_blocking=True)
+-        sg = s13[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w13[e0:e1], dev)
++        sg = _h2d(s13[e0:e1], dev)
+         for i in range(e1 - e0):
+             codes, sbytes, nib = fp8_block_to_codes_scales(
+                 wg[i], sg[i], want_nibbles=fp13 is not None)
+@@ -349,8 +349,8 @@
+             sc13[e0 + i] = pack_scales(sbytes)
+             if fp13 is not None:
+                 fp13[e0 + i] = pack_fp4_fragment_major(nib)
+-        wg = w2[e0:e1].to(dev, non_blocking=True)
+-        sg = s2[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w2[e0:e1], dev)
++        sg = _h2d(s2[e0:e1], dev)
+         for i in range(e1 - e0):
+             codes, sbytes, nib = fp8_block_to_codes_scales(
+                 wg[i], sg[i], want_nibbles=fp2 is not None)
+@@ -402,10 +402,10 @@
+     group = K13 // s13.shape[2]                 # 16 for NVFP4
+     _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
+ 
+-    planes13 = torch.empty(E, N13 * K13 // 4, dtype=torch.uint8, device=dev)
+-    sc13 = torch.empty(E, N13 * K13 // 32, dtype=torch.uint8, device=dev)
+-    planes2 = torch.empty(E, N2 * K2 // 4, dtype=torch.uint8, device=dev)
+-    sc2 = torch.empty(E, N2 * K2 // 32, dtype=torch.uint8, device=dev)
++    planes13 = _plane_alloc(E, N13 * K13 // 4, dev)
++    sc13 = _plane_alloc(E, N13 * K13 // 32, dev)
++    planes2 = _plane_alloc(E, N2 * K2 // 4, dev)
++    sc2 = _plane_alloc(E, N2 * K2 // 32, dev)
+ 
+     tier = moe_w2_delta.get_tier(n_experts=E, dev=dev,
+                                  w13_bytes=N13 * K13 // 2,
+@@ -420,9 +420,9 @@
+     chunk = 8
+     for e0 in range(0, E, chunk):
+         e1 = min(e0 + chunk, E)
+-        wg = w13[e0:e1].to(dev, non_blocking=True)
+-        sg = s13[e0:e1].to(dev, non_blocking=True)
+-        s2g = s13_2[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w13[e0:e1], dev)
++        sg = _h2d(s13[e0:e1], dev)
++        s2g = _h2d(s13_2[e0:e1], dev)
+         half = N13 // 2                          # rows [0:I]=w1, [I:2I]=w3
+         for i in range(e1 - e0):
+             s2_row = torch.cat((s2g[i, 0].expand(half), s2g[i, 1].expand(half)))
+@@ -433,9 +433,9 @@
+             sc13[e0 + i] = pack_scales(sbytes)
+             if fp13 is not None:
+                 fp13[e0 + i] = pack_fp4_fragment_major(nib)
+-        wg = w2[e0:e1].to(dev, non_blocking=True)
+-        sg = s2[e0:e1].to(dev, non_blocking=True)
+-        s2g = s2_2[e0:e1].to(dev, non_blocking=True)
++        wg = _h2d(w2[e0:e1], dev)
++        sg = _h2d(s2[e0:e1], dev)
++        s2g = _h2d(s2_2[e0:e1], dev)
+         for i in range(e1 - e0):
+             codes, sbytes, nib = nvfp4_to_codes_scales(
+                 wg[i], sg[i], s2g[i], group=group,
+@@ -455,6 +455,281 @@
                     "w2_weight_scale"))
  
  
++_PIN_BOUNCE: dict = {}
++
++# Plane storage: on unified-memory hosts, keep the 2-bit planes in PINNED
++# HOST memory instead of the CUDA pool. Same LPDDR, same bandwidth, and the
++# SASS kernels take raw (UVA-valid) pointers from the desc table — but it
++# sidesteps the GB10 driver behavior where cudaMalloc'd content grows
++# CPU-side mirror arenas during load (which OOM'd the box at ~26/43 layers).
++# Override with VLLM_MOE_W2_HOST_PLANES=0/1.
++
++
++def _host_planes() -> bool:
++    v = os.getenv("VLLM_MOE_W2_HOST_PLANES")
++    if v is not None:
++        return v == "1"
++    try:
++        return bool(getattr(torch.cuda.get_device_properties(0),
++                            "is_integrated", 0))
++    except Exception:  # noqa: BLE001
++        return False
++
++
++def _plane_alloc(e: int, nbytes: int, dev) -> torch.Tensor:
++    if _host_planes():
++        # PLAIN PAGEABLE host memory — not pinned! cudaHostAlloc on GB10 is
++        # shmem-backed with power-of-2 rounding (a 20 GiB ask costs ~33 GiB),
++        # while the SASS kernels read pageable pointers coherently via ATS
++        # at identical speed (op-validated: spark/moe_w2_check_hostb.py).
++        return torch.empty(e, nbytes, dtype=torch.uint8)
++    return torch.empty(e, nbytes, dtype=torch.uint8, device=dev)
++
++
++def _h2d(t: torch.Tensor, dev) -> torch.Tensor:
++    """H2D copy via a cached pinned bounce buffer.
++
++    On unified-memory hosts (GB10), an async H2D from PAGEABLE memory is
++    executed by the CPU writing straight into the UVM destination — those
++    destination pages become CPU-resident on top of their device backing,
++    and with allocator churn the double-resident pages accumulate to tens
++    of GiB across a 40+-layer load. A pinned source makes the copy a DMA:
++    the destination stays device-resident only. The bounce buffers are keyed
++    by (shape, dtype) and reused across layers (~0.5 GiB total)."""
++    if not t.is_cuda and not t.is_pinned():
++        key = (tuple(t.shape), t.dtype)
++        buf = _PIN_BOUNCE.get(key)
++        if buf is None:
++            buf = _PIN_BOUNCE[key] = torch.empty(
++                t.shape, dtype=t.dtype, pin_memory=True)
++        buf.copy_(t)
++        t = buf
++    # PERSISTENT device destination, reused for every chunk: on GB10 the
++    # driver executes H2D with CPU writes, which leaves the destination's
++    # UVM pages CPU-resident forever. Fresh caching-allocator blocks each
++    # chunk accumulate ~2-3 GiB of such pages PER LAYER (the planes
++    # fragment the pool, so transients keep landing on new extents);
++    # reusing one buffer per shape bounds it at ~1 GiB total.
++    key_d = ("dev", tuple(t.shape), t.dtype)
++    dbuf = _PIN_BOUNCE.get(key_d)
++    if dbuf is None:
++        dbuf = _PIN_BOUNCE[key_d] = torch.empty(
++            t.shape, dtype=t.dtype, device=dev)
++    dbuf.copy_(t, non_blocking=True)
++    return dbuf
++
++
++def release_pin_bounce() -> None:
++    _PIN_BOUNCE.clear()
++
++
++# --------------------------------------------------------------------------
++# Prepacked planes (spark/prepack_planes.py): load 2-bit planes straight from
++# disk — no staging, no requant, no transient churn at serve time. The whole
++# in-process conversion pipeline is the fallback when no prepack exists.
++# --------------------------------------------------------------------------
++
++def prepacked_path(layer_name: str) -> str | None:
++    d = os.getenv("VLLM_MOE_W2_PREPACKED_DIR")
++    if not d:
++        return None
++    import re as _re
++    m = _re.search(r"\.layers\.(\d+)\.", layer_name or "")
++    if m is None:
++        return None
++    p = os.path.join(os.path.expanduser(d), f"layer_{int(m.group(1)):03d}")
++    return p if os.path.exists(p + ".meta.json") else None
++
++
++def noop_weight_loader(param, loaded_weight, *args, **kwargs):
++    """Substitute loader for prepacked layers: the checkpoint expert bytes
++    are not needed (planes come from disk); report success so the model's
++    load bookkeeping stays happy."""
++    return True if kwargs.get("return_success") else None
++
++
++def load_prepacked_layer(layer, key: int, prefix: str) -> None:
++    import json as _json
++    import numpy as _np
++    assert _ensure_ready(), "moe_w2 cubins missing"
++    dev = torch.device("cuda")
++    meta = _json.load(open(prefix + ".meta.json"))
++    E, N13, K13, N2, K2 = (meta[k] for k in ("E", "N13", "K13", "N2", "K2"))
++    from vllm.model_executor.layers.quantization.utils import moe_w2_delta
++    _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
++    outs = []
++    for tag in ("planes13", "sc13", "planes2", "sc2"):
++        arr = _np.load(f"{prefix}.{tag}.npy", mmap_mode="r")
++        t = _plane_alloc(arr.shape[0], arr.shape[1], dev)
++        t.copy_(torch.from_numpy(_np.ascontiguousarray(arr)))
++        outs.append(t)
++    planes13, sc13, planes2, sc2 = outs
++    _finish_layer(layer, key, dev, planes13, sc13, planes2, sc2,
++                  N13, K13, N2, K2, E,
++                  ("w13_weight", "w13_weight_scale", "w2_weight",
++                   "w2_weight_scale"))
++    logger.info("moe_w2: layer %d planes loaded PREPACKED from %s", key,
++                os.path.basename(prefix))
++
++
 +# --------------------------------------------------------------------------
 +# Eager per-layer build (unified-memory hosts: DGX Spark / GB10 etc.)
 +# --------------------------------------------------------------------------
@@ -79,6 +355,18 @@
 +
 +_EAGER_LOCK = __import__("threading").Lock()
 +_EAGER_FALLBACK_WARNED = False
++_EAGER_NEXT_KEY = 0
++
++# Backpressure: vLLM loads checkpoint files with several reader threads, so
++# staged-but-unconverted layers pile up (~3.2 GiB each on DS4) while the
++# conversions serialize — unbounded, that runahead OOMs a unified-memory
++# host. Gate the FIRST write of a new layer until the backlog drains. The
++# gate never blocks mid-layer writes, so every started layer can always
++# complete, build, and open the gate: no deadlock.
++_EAGER_COND = __import__("threading").Condition(_EAGER_LOCK)
++_EAGER_STARTED = 0
++_EAGER_BUILT = 0
++_EAGER_INFLIGHT = int(os.getenv("VLLM_MOE_W2_EAGER_INFLIGHT", "4"))
 +
 +
 +def eager_build_enabled() -> bool:
@@ -121,22 +409,70 @@
 +    def _wrap(pname, inner):
 +        @functools.wraps(inner)
 +        def loader(param, loaded_weight, *args, **kwargs):
++            global _EAGER_STARTED, _EAGER_BUILT, _EAGER_NEXT_KEY
++            if not done.get("started"):
++                with _EAGER_COND:
++                    if not done.get("started"):
++                        waited = 0.0
++                        while (_EAGER_STARTED - _EAGER_BUILT
++                               >= _EAGER_INFLIGHT and waited < 600):
++                            _EAGER_COND.wait(5.0)
++                            waited += 5.0
++                        if waited >= 600:
++                            logger.warning("moe_w2 eager: backpressure gate "
++                                           "timed out — proceeding")
++                        done["started"] = True
++                        _EAGER_STARTED += 1
 +            ret = inner(param, loaded_weight, *args, **kwargs)
 +            # expert_id is the last positional (weight_name, shard_id,
 +            # expert_id) or a kwarg, depending on caller
 +            expert_id = kwargs.get("expert_id",
 +                                   args[-1] if args else None)
 +            with _EAGER_LOCK:
++                if done["built"]:
++                    logger.warning(
++                        "moe_w2 eager: loader call AFTER build! layer=%s "
++                        "pname=%s args=%r kwargs=%r", done.get("key"),
++                        pname, args[:3], list(kwargs))
++                    return ret
 +                seen[pname] += (expected[pname] - seen[pname]
 +                                if expert_id is None else 1)
-+                if done["built"] or not _complete():
++                if not _complete():
 +                    return ret
 +                done["built"] = True
-+                key = _eager_key()
++                key = done["key"] = _EAGER_NEXT_KEY
++                _EAGER_NEXT_KEY += 1
 +            build_fn(layer, key)
 +            layer._moe_w2_key = key
++            # Return freed transient blocks to the driver each layer: on
++            # GB10, pool pages that were ever CPU-written stay host-resident
++            # while cached in the allocator — releasing whole segments drops
++            # both residencies.
++            torch.cuda.empty_cache()
++            # Drop the checkpoint's page cache: cudaMalloc on GB10 takes
++            # system RAM but does NOT trigger page-cache reclaim, so the
++            # mmap'd safetensors cache (up to the full 149 GiB checkpoint)
++            # races weight allocation to the bottom of RAM and wins ("754 MiB
++            # free" CUDA OOMs while tens of GiB sit in reclaimable cache).
++            glob_pat = os.getenv("VLLM_MOE_W2_FADVISE_GLOB")
++            if glob_pat:
++                import glob as _glob
++                for fpath in _glob.glob(os.path.expanduser(glob_pat)):
++                    try:
++                        fd = os.open(fpath, os.O_RDONLY)
++                        try:
++                            os.posix_fadvise(fd, 0, 0,
++                                             os.POSIX_FADV_DONTNEED)
++                        finally:
++                            os.close(fd)
++                    except OSError:
++                        pass
++            with _EAGER_COND:
++                _EAGER_BUILT += 1
++                _EAGER_COND.notify_all()
 +            logger.info("moe_w2: layer %d planes built EAGERLY "
-+                        "(staging freed at load)", key)
++                        "(staging freed at load, backlog %d)",
++                        key, _EAGER_STARTED - _EAGER_BUILT)
 +            return ret
 +        return loader
 +
@@ -163,3 +499,25 @@
  def _finish_layer(layer, layer_key, dev, planes13, sc13, planes2, sc2,
                    N13, K13, N2, K2, E, param_names) -> None:
      from vllm.model_executor.layers.quantization.utils import moe_w2_delta
+@@ -493,10 +768,21 @@
+         N13=N13, K13=K13, N2=N2, K2=K2, E=E,
+     )
+     # Release checkpoint copies; keep CUDA stubs so device probes stay happy.
++    # Free the OLD param objects' storage in place too: the model's
++    # load_weights holds a params_dict snapshot that keeps them alive past
++    # re-registration, which pins the full staged expert set until loading
++    # ends — fatal on unified-memory hosts.
+     stub = torch.empty(0, dtype=torch.uint8, device=dev)
++    freed = 0
+     for name in param_names:
++        old = getattr(layer, name, None)
++        if old is not None and old.data.numel():
++            freed += old.data.numel() * old.data.element_size()
++            old.data = torch.empty(0, dtype=old.data.dtype,
++                                   device=old.data.device)
+         layer.register_parameter(
+             name, torch.nn.Parameter(stub, requires_grad=False))
++    logger.debug("moe_w2: staging released %d MB", freed >> 20)
+     logger.info("moe_w2: layer %d planes built (%.2f GiB)", layer_key,
+                 (planes13.nbytes + sc13.nbytes + planes2.nbytes + sc2.nbytes)
+                 / 2**30)
