@@ -84,9 +84,19 @@ systemd-run --user --scope -p MemoryMax=40G \
   --model ~/models/hf/DeepSeek-V4-Flash
 ```
 
-Output lands in `<model>/moe_w2_planes/` (73 GiB for DS4, ~192 GiB for GLM).
-For dual-node GLM, both nodes need the checkpoint AND the planes — prepack
-once and `rsync` both to the peer (the 200G link makes this quick).
+**Or skip the prepack entirely** — we publish the exact output:
+
+```bash
+hf download sapidlabs/DeepSeek-V4-Flash-moe-w2-planes \
+  --local-dir ~/models/hf/DeepSeek-V4-Flash/moe_w2_planes
+hf download sapidlabs/GLM-5.2-moe-w2-planes \
+  --local-dir ~/models/hf/GLM-5.2-FP8/moe_w2_planes
+```
+
+Output/download lands in `<model>/moe_w2_planes/` (73 GiB for DS4, ~192 GiB
+for GLM). For dual-node GLM, both nodes need the checkpoint AND the planes —
+prepack/download once and `rsync` to the peer (the 200G link makes this
+quick).
 
 ## 3. Single Spark: DeepSeek-V4-Flash
 
