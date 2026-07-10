@@ -26,15 +26,15 @@ sleep 2
 
 echo "== head (this node, .1) =="
 bash -lc "env $COMMON VLLM_HOST_IP=192.168.100.1 \
-  systemd-run --user --scope --collect -p MemoryMax=112G -p MemorySwapMax=0 \
-  $VENV/bin/ray start --head --node-ip-address=192.168.100.1 --port=6379 --block" &
+  systemd-run --user --scope --collect -p MemoryMax=102G -p MemorySwapMax=0 \
+  $VENV/bin/ray start --head --node-ip-address=192.168.100.1 --port=6379 --object-store-memory=2000000000"
 sleep 6
 
 echo "== worker (peer, .2) =="
 ssh 192.168.100.2 "bash -lc \"env $COMMON VLLM_HOST_IP=192.168.100.2 \
-  systemd-run --user --scope --collect -p MemoryMax=112G -p MemorySwapMax=0 \
-  $VENV/bin/ray start --address=192.168.100.1:6379 \
-  --node-ip-address=192.168.100.2 --block\"" &
+  systemd-run --user --scope --collect -p MemoryMax=114G -p MemorySwapMax=0 \
+  $VENV/bin/ray start --address=192.168.100.1:6379 --object-store-memory=2000000000 \
+  --node-ip-address=192.168.100.2\""
 sleep 8
 
 bash -lc "$VENV/bin/ray status"

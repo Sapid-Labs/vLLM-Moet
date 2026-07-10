@@ -126,7 +126,7 @@
  
          # Allow for accessing weights and scales in standard way.
 --- a/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 19:03:45.329985467 -0400
-+++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-09 22:23:29.442471653 -0400
++++ b/vllm/model_executor/layers/quantization/utils/moe_w2_cubit.py	2026-07-10 00:01:57.064893394 -0400
 @@ -244,10 +244,10 @@
      from vllm.model_executor.layers.quantization.utils import moe_w2_delta
      _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
@@ -241,7 +241,7 @@
          for i in range(e1 - e0):
              codes, sbytes, nib = nvfp4_to_codes_scales(
                  wg[i], sg[i], s2g[i], group=group,
-@@ -455,6 +455,282 @@
+@@ -455,6 +455,291 @@
                     "w2_weight_scale"))
  
  
@@ -349,8 +349,17 @@
 +    from vllm.model_executor.layers.quantization.utils import moe_w2_delta
 +    _require_kernels(K13, K2, need_w4=moe_w2_delta.enabled())
 +    outs = []
++    mmap_planes = os.getenv("VLLM_MOE_W2_PLANES_MMAP", "0") == "1"
 +    for tag in ("planes13", "sc13", "planes2", "sc2"):
 +        arr = _np.load(f"{prefix}.{tag}.npy", mmap_mode="r")
++        if mmap_planes:
++            # keep the planes FILE-BACKED: the kernels read them via ATS
++            # straight out of the page cache, and the kernel evicts cold
++            # experts under memory pressure (free disk-backed expert cache;
++            # GLM routes ~90% of tokens through ~20% of experts). Cuts each
++            # rank's anonymous footprint by the full plane size.
++            outs.append(torch.from_numpy(arr))
++            continue
 +        t = _plane_alloc(arr.shape[0], arr.shape[1], dev)
 +        t.copy_(torch.from_numpy(_np.ascontiguousarray(arr)))
 +        outs.append(t)
@@ -524,7 +533,7 @@
  def _finish_layer(layer, layer_key, dev, planes13, sc13, planes2, sc2,
                    N13, K13, N2, K2, E, param_names) -> None:
      from vllm.model_executor.layers.quantization.utils import moe_w2_delta
-@@ -493,10 +769,21 @@
+@@ -493,10 +778,21 @@
          N13=N13, K13=K13, N2=N2, K2=K2, E=E,
      )
      # Release checkpoint copies; keep CUDA stubs so device probes stay happy.

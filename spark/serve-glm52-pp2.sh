@@ -17,6 +17,9 @@ export VLLM_MOE_W2=1
 export VLLM_MOE_W2_DELTA_GB=0          # pinned host store double-dips unified mem
 export VLLM_MOE_W2_CUBIT_DIR="$REPO/kernels/cubins-sm120"
 export VLLM_MOE_W2_PREPACKED_DIR="$MODEL/moe_w2_planes"
+# planes stay file-backed (page cache): kernel evicts cold experts under
+# pressure — the two ranks' anon footprints finally sum under 2x121 GiB
+export VLLM_MOE_W2_PLANES_MMAP=1
 export VLLM_MOE_W2_FADVISE_GLOB="$MODEL/*.safetensors"
 export MALLOC_MMAP_THRESHOLD_=65536
 
@@ -30,17 +33,18 @@ export NCCL_IB_DISABLE=1   # PP boundary traffic is one 6144-vector/token; TCP i
 
 # 78 layers: rank0 carries embeddings + 3 dense layers; give rank1 one more
 # MoE layer only if memory tilts. Start even.
-# export VLLM_PP_LAYER_PARTITION="39,39"
+export VLLM_PP_LAYER_PARTITION="38,40"
 
 ARGS=(
   --served-model-name glm-5.2 --trust-remote-code
   --distributed-executor-backend ray --pipeline-parallel-size 2
   --kv-cache-dtype fp8 --max-model-len 8192
-  # KV budget = util x total(121.7) - measured-used (system-wide incl. host
-  # planes ~95 + cuda ~13 + base). Tune from the "Available KV cache memory"
-  # log line; 0.93 targets ~4-6 GiB KV per rank.
-  --gpu-memory-utilization 0.93
-  --max-num-batched-tokens 1024 --max-num-seqs 2
+  # util only gates the STARTUP free-memory check (free >= util*total);
+  # the KV pool is pinned explicitly below (2 GiB/rank ~ 40K+ MLA tokens),
+  # which overrides the util-derived budget.
+  --gpu-memory-utilization 0.85
+  --kv-cache-memory-bytes 2147483648
+  --max-num-batched-tokens 512 --max-num-seqs 2
   --host 0.0.0.0 --port 8000
 )
 
@@ -51,6 +55,10 @@ else
   ARGS+=(--compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}')
 fi
 
+# purge page cache on both nodes: the startup check needs free >= util*total
+python3 "$REPO/spark/purge-cache.py" "$HOME/models/hf" || true
+ssh 192.168.100.2 "python3 ~/Dev/vLLM-Moet/spark/purge-cache.py ~/models/hf" || true
+
 exec systemd-run --user --scope --collect \
-  -p MemoryMax=112G -p MemorySwapMax=0 \
+  -p MemoryMax=10G -p MemorySwapMax=0 \
   "$VENV/bin/vllm" serve "$MODEL" "${ARGS[@]}" "$@"
