@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Recordable inference demo: live token stream + speed stats.
 
+Token counts come from the server's usage stats (stream_options.include_usage),
+not from counting stream chunks — with MTP speculative decoding one chunk can
+carry several accepted tokens, which made the old chunk-count undercount ~40%.
+
 usage: demo.py [prompt] [--tokens N] [--model glm-5.2] [--port 8000]
 """
 import argparse
@@ -18,8 +22,9 @@ ap.add_argument("--model", default="glm-5.2")
 ap.add_argument("--port", type=int, default=8000)
 args = ap.parse_args()
 
-banner = f"GLM-5.2 · 753B params · 2x NVIDIA DGX Spark · 2-bit MoE experts" \
-    if args.model == "glm-5.2" else f"{args.model}"
+banner = ("GLM-5.2 · 753B params · 2x NVIDIA DGX Spark (TP2 over 200G RoCE) · "
+          "2-bit MoE experts · expert-pruned 256→208 · MTP speculative decode"
+          ) if args.model == "glm-5.2" else f"{args.model}"
 print(f"\033[1m{banner}\033[0m")
 print(f"\033[2m> {args.prompt}\033[0m\n")
 
@@ -27,26 +32,28 @@ req = urllib.request.Request(
     f"http://127.0.0.1:{args.port}/v1/chat/completions",
     json.dumps({
         "model": args.model, "temperature": 0, "max_tokens": args.tokens,
-        "stream": True,
+        "stream": True, "stream_options": {"include_usage": True},
         "messages": [{"role": "user", "content": args.prompt}],
     }).encode(),
     {"Content-Type": "application/json"})
 
 t0 = time.time()
 ttft = None
-n = 0
+usage = None
 thinking = False
 with urllib.request.urlopen(req, timeout=1800) as r:
     for line in r:
         if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
             continue
-        d = json.loads(line[6:])["choices"][0].get("delta", {})
-        piece = d.get("content") or ""
-        reason = d.get("reasoning_content") or ""
-        if piece or reason:
-            if ttft is None:
-                ttft = time.time() - t0
-            n += 1
+        d = json.loads(line[6:])
+        usage = d.get("usage") or usage
+        if not d["choices"]:
+            continue
+        delta = d["choices"][0].get("delta", {})
+        piece = delta.get("content") or ""
+        reason = delta.get("reasoning_content") or ""
+        if (piece or reason) and ttft is None:
+            ttft = time.time() - t0
         if reason and not thinking:
             sys.stdout.write("\033[2m")   # dim the thinking
             thinking = True
@@ -57,6 +64,7 @@ with urllib.request.urlopen(req, timeout=1800) as r:
         sys.stdout.flush()
 
 wall = time.time() - t0
+n = usage["completion_tokens"] if usage else 0
 decode = (n - 1) / (wall - ttft) if n > 1 and wall > ttft else 0
 print(f"\n\n\033[1m--- {n} tokens · TTFT {ttft:.1f}s · "
       f"{decode:.1f} tok/s decode · {wall:.1f}s total ---\033[0m")
