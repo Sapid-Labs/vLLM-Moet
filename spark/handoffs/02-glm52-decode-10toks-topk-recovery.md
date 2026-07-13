@@ -7,7 +7,34 @@ GLM-5.2 single-stream decode **≥ 10 tok/s** on the two DGX Sparks (TP2), at
 problem is recovering quality at low top-k. Ends when a config sustains
 ≥10 tok/s and passes `spark/mtp_correctness_battery.py --model glm-5.2`.
 
-## State (2026-07-13, session 7b — **TARGET MET: 11.44 tok/s sustained at NATIVE k=8, battery CLEAN**, via frequency-pruned 208-expert planes)
+## State (2026-07-13, session 8 — **MTP RETRY on pruned planes: 15.0 tok/s sustained, battery CLEAN** — spec decode verdict REVERSED, now +31%)
+
+Retried MTP speculative decode (k=1, GLM's native next-n drafter) on top of the
+session-7b pruned-resident config. The session-1–4 verdict (−17%, "parked") was
+measured on unpruned 97 GB planes where verify's extra expert reads amplified
+page-cache thrash. On fully-resident pruned planes the economics flip:
+
+- **Sustained decode 15.09 / 15.02 / 15.01 tok/s** (512→1024 differential,
+  essay domain, post-settle — same protocol as the 11.44 baseline), **fault-free**
+  (1–36 MiB NVMe per pair once settled). +31% over non-MTP 11.44.
+- **Acceptance 67.6%** (1885/2789 drafts, temp 0.7 essay). Ideal speedup at
+  that acceptance is 1.68×; measured 1.31× — the gap is verify's extra
+  expert-plane reads (~28% per-step cost), affordable now that reads come from
+  page cache instead of NVMe.
+- **Battery VERDICT: CLEAN** (arithmetic ×2, fact, prose ×2 all PASS) +
+  free-form probes clean (24×17=408, 391/17=23, 1001=7·11·13, Rayleigh prose).
+- **Serve (new shipped config):**
+  `VLLM_MOE_W2_PREPACKED_DIR=$HOME/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208
+  MTP_K=1 bash spark/serve-glm52-tp2-mtp.sh` — the MTP script now respects a
+  pre-set PREPACKED_DIR (same one-line fix as the plain script). Pruned planes
+  include layer 78 (the MTP drafter's MoE) UNPRUNED (keep=256), so the drafter
+  routes over the full pool; only the 75 main MoE layers are 256→208.
+- Untested upside: `MTP_K=2` (drafter reused autoregressively). At 67.6%
+  pos-0 acceptance the marginal token is ~0.4/step against a 3rd position of
+  expert reads — plausibly small gain, needs a reboot to test.
+- Server left RUNNING in this config (MTP k=1, pruned planes, native k=8, mmap).
+
+## Prior state (2026-07-13, session 7b — **TARGET MET: 11.44 tok/s sustained at NATIVE k=8, battery CLEAN**, via frequency-pruned 208-expert planes)
 
 The residency smoke test didn't just validate the hypothesis — it hit the
 full goal. Config: pool-pruned planes (coldest-48-per-layer by measured k=8
@@ -284,7 +311,13 @@ Key findings this session:
   tok/s — proven by two identical back-to-back k=8 runs (2.63 then 4.23).
   Desktop Firefox on `.1` steals shared LPDDR5X bandwidth (−40%).
 
-## Next steps (ranked, updated session 7b — target met; all items are now upside)
+## Next steps (ranked, updated session 8 — 15 tok/s shipped; all items are upside)
+
+-1. **MTP_K=2 sweep** (cheap, one reboot): measure acceptance at pos 1 and
+   whether the marginal ~0.4 tok/step beats the 3rd position's read cost.
+   Also re-measure acceptance per domain — 67.6% was essay/temp-0.7 only.
+
+## Old next steps (session 7b)
 
 0. ~~THP tier attempt~~ **DONE session 7b: NO GAIN (11.47 = 11.44), mmap
    stays the shipped config** (see State). If more speed is ever needed,
