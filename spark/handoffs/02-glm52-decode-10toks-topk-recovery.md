@@ -39,7 +39,16 @@ cudagraphs.
 - **Caveat:** expert selection is frequency-based (smoke-test quality). REAP
   saliency selection (next steps) may pick a better set; current quality
   already gates CLEAN, so that's now an upside option, not a blocker.
-- Server left RUNNING on pruned planes, native k=8, capture on.
+- **THP tier tried (session 7b) — NO GAIN: 11.47/11.43 tok/s, identical to
+  mmap.** `VLLM_MOE_W2_PLANES_THP=1` boots fine post-prune (110/121 GB used)
+  but only ~half the planes get 2 MiB backing (AnonHugePages 38/49 GB of
+  79 — fragmentation under pressure), and decode rate doesn't move. At
+  87 ms/tok the effective plane-read rate is ~52 GB/s in BOTH configs, so
+  fault-free decode is no longer bound by the 4 KiB-vs-2 MiB ATS penalty
+  (contradicts the extrapolated "170 GB/s ⇒ well past 10" projection —
+  something shared binds first). **Shipped config = mmap** (same speed, far
+  more headroom; page cache degrades gracefully instead of OOMing).
+- Server left RUNNING on pruned planes (mmap config), native k=8, capture on.
 
 ## Prior state (2026-07-13, session 7 — k=8 traffic CDF MEASURED: routing is much flatter than assumed; prune ratio picked at 48/layer)
 
@@ -277,11 +286,10 @@ Key findings this session:
 
 ## Next steps (ranked, updated session 7b — target met; all items are now upside)
 
-0. **THP tier attempt (biggest remaining speed lever):**
-   `VLLM_MOE_W2_PLANES_THP=1` now FITS post-prune (79 anon planes + 32 other
-   ≈ 111 < 121 GB): 2 MiB anon pages restore ~170 GB/s ATS reads vs 4 KiB
-   file pages. If boot OOMs or decode regresses, drop back to the mmap
-   config above (known-good 11.44).
+0. ~~THP tier attempt~~ **DONE session 7b: NO GAIN (11.47 = 11.44), mmap
+   stays the shipped config** (see State). If more speed is ever needed,
+   first profile what binds fault-free decode at 87 ms/tok (effective plane
+   read ~52 GB/s « 273 raw) — page size isn't it.
 1. **REAP saliency calibration of GLM-5.2 to pick the 48-per-layer prune set.**
    `~/Dev/reap` branch `add-glm_moe_dsa-support` (ec1ad70) is ported and
    smoke-tested. Needs: layer-wise disk streaming (194 GB model > 128 GB RAM),
