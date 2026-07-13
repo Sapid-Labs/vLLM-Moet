@@ -5,14 +5,21 @@ across **two**, using vLLM-Moet's 2-bit expert kernels. Everything here is
 measured on real hardware (GB10, sm_121, 121 GiB unified LPDDR5x per node,
 CUDA 13, driver 580.159.03).
 
-**Status (2026-07-10):**
+**Status (2026-07-13):**
 - DeepSeek-V4-Flash, 1 Spark: **working** — coherent greedy output,
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
-- GLM-5.2, 2 Sparks (PP2): **working** — correct greedy reasoning/arithmetic,
-  ~5.5 tok/s single-stream and **~17 tok/s aggregate at 8 streams** (CUDA
-  graphs + NCCL over RoCE; batch scaling near-linear to 4). Single-stream
-  is bounded by the PP bubble; run `spark/warm-planes.sh` after startup to
-  avoid slow first requests (plane faults from NVMe).
+- GLM-5.2, 2 Sparks (TP2): **working — 15.0 tok/s single-stream sustained**,
+  quality battery clean, GSM8K 91%. The shipped config stacks three levers
+  (sessions 1-8, `spark/handoffs/02-*.md`): FULL cudagraphs over RoCE
+  (needs NCCL 2.30.7), expert-pruned planes (256→208/layer — shrinks planes
+  97→79 GB/rank so they fit page cache; decode goes fault-free), and MTP
+  speculative decode k=1 (+31% — a *loss* before pruning, a win once verify
+  reads come from cache). Routing stays at native top-k=8.
+- GLM-5.2 PP2 fallback: ~5.5 tok/s single-stream, ~17 tok/s aggregate at
+  8 streams. Simpler, no NCCL version pin; keep it in your pocket if TP2
+  misbehaves.
+- Run `spark/warm-planes.sh` after startup either way to avoid slow first
+  requests (plane faults from NVMe).
 
 Background reading: `spark/README.md` (port notes) and the "unified-memory
 load war" section of the How To Spark lab notes — six GB10-specific memory
@@ -93,19 +100,27 @@ systemd-run --user --scope -p MemoryMax=40G \
   --model ~/models/hf/DeepSeek-V4-Flash
 ```
 
-**Or skip the prepack entirely** — we publish the exact output:
+Output lands in `<model>/moe_w2_planes/` (73 GiB for DS4, ~192 GiB for GLM
+full-pool). For dual-node GLM you want the **TP2-sharded, expert-pruned**
+planes instead — that's the 15 tok/s config. Either produce them
+(`prepack_planes.py` TP2 variant, then `spark/routing/prune_planes.py`
+with `spark/routing/keep208.json` — row-select, no requant, ~15 min), or
+**skip prepack entirely** and download the exact artifact we serve:
 
 ```bash
-hf download sapidlabs/DeepSeek-V4-Flash-moe-w2-planes \
-  --local-dir ~/models/hf/DeepSeek-V4-Flash/moe_w2_planes
-hf download sapidlabs/GLM-5.2-moe-w2-planes \
-  --local-dir ~/models/hf/GLM-5.2-FP8/moe_w2_planes
+# ~79 GB per rank; each node downloads only ITS shard
+# on .1:
+hf download sapidlabs/GLM-5.2-2bit-MoE-planes-pruned208-tp2 --include 'rank0/*' \
+  --local-dir /tmp/planes && mv /tmp/planes/rank0 ~/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208
+# on .2: same with 'rank1/*'
 ```
 
-Output/download lands in `<model>/moe_w2_planes/` (73 GiB for DS4, ~192 GiB
-for GLM). For dual-node GLM, both nodes need the checkpoint AND the planes —
-prepack/download once and `rsync` to the peer (the 200G link makes this
-quick).
+Both nodes still need the base checkpoint (config/tokenizer/non-expert
+weights). Pruning note: 48 coldest-by-traffic experts dropped per MoE layer
+(selection-masked, gates renormalize — REAP-style); this is what makes the
+planes page-cache-resident (79 < ~88 GB cache), which is the whole speed
+story. Quality: correctness battery clean, GSM8K 91% (300-ex, measured on
+this exact config).
 
 ## 3. Single Spark: DeepSeek-V4-Flash
 
@@ -118,11 +133,36 @@ First start JIT-compiles flashinfer kernels (minutes); later starts take
 ~3 min (plane read + dense stream). Expect ~105/121 GiB used and ~21 tok/s
 single-stream. An OpenAI-compatible API serves on `:8000`.
 
-## 4. Two Sparks: GLM-5.2 (753B, pipeline-parallel)
+## 4. Two Sparks: GLM-5.2 (753B, tensor-parallel — the 15 tok/s config)
+
+One extra prerequisite: **NCCL ≥ 2.30.7** staged at `~/nccl-2.30.7/libnccl.so.2`
+on both nodes (extract from the `nvidia-nccl-cu13` wheel). Torch's bundled
+2.28.9 deadlocks TP2 FULL cudagraph replay on GB10+CX7 (`spark/handoffs/01-*.md`);
+`start-ray-cluster.sh` delivers the pin via `VLLM_NCCL_SO_PATH` and also
+resolves each node's RoCEv2 GID index at start time (they drift across
+reboots — check its `== RoCEv2 GID indexes ==` banner first if NCCL dies at init).
 
 ```bash
 # on the head node (.1):
 ~/Dev/vLLM-Moet/spark/start-ray-cluster.sh    # raylets on both nodes, memory-capped
+VLLM_MOE_W2_PREPACKED_DIR=$HOME/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208 \
+  MTP_K=1 ~/Dev/vLLM-Moet/spark/serve-glm52-tp2-mtp.sh
+~/Dev/vLLM-Moet/spark/warm-planes.sh ~/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208 --peer
+```
+
+Boot log must show `POOL-PRUNED 256->208` (once per MoE layer per rank) —
+if not, the pruned-planes dir wasn't picked up. Expect ~15 tok/s sustained
+single-stream after a few hundred tokens of settling (the resident-expert
+tier warms by inference, not by `warm-planes.sh`). During decode,
+`power.draw` >~30 W means working; ~17-20 W means memory-stalled. Speed
+sanity: measure with `usage.completion_tokens` differentials (512 vs 1024),
+never by counting stream chunks — MTP bundles tokens per chunk. Or just run
+`spark/demo.py`, which does it right.
+
+### PP2 fallback (simpler, slower)
+
+```bash
+~/Dev/vLLM-Moet/spark/start-ray-cluster.sh
 ~/Dev/vLLM-Moet/spark/serve-glm52-pp2.sh --eager
 ```
 
@@ -154,24 +194,36 @@ What the scripts encode (don't skip these if you roll your own):
   both nodes, `pkill -9 -f EngineCore`, restart the cluster.
 - **nvidia-smi shows no memory numbers**: normal on GB10; watch `free -g`.
 
-## 6. Known limitations (today)
+## 6. Known limitations & hard-won verdicts (2026-07-13)
 
-- Eager mode only so far; CUDA-graph mode untested on GB10 (expect modest
-  gains — decode is bandwidth-bound and MTP already hides launch latency).
-- GLM PP2 runs without MTP — **by choice, not defect** (settled 2026-07-10):
-  MTP-under-PP works (drafter loads on rank 1, drafts accepted at ~2.2/2+1,
-  long prompts complete once the planes are warm), but it is a net
-  *slowdown* here: 3.65 tok/s with MTP k=2 vs 4.9-5.5 without. The verify
-  step computes 3 positions whose top-8 routes hit mostly-distinct experts,
-  so the weight-read-bound moe_w2 path pays ~3x traffic for ~2.2x tokens
-  (upstream's 2x gain assumed VRAM-resident weights). Note when measuring:
-  `bench_decode.py` counts SSE frames — spec configs bundle tokens per
-  frame; use `usage.completion_tokens` differentials.
-- Cold long-prompt TTFT is minutes: each 512-token prefill chunk touches
-  nearly all experts (~95 GiB/rank of plane faults from NVMe, ~150 s/chunk
-  cold). Run `spark/warm-planes.sh` after any cache purge; don't mistake a
-  cold prefill for a hang (it was misdiagnosed as an MTP defect for a day).
+- **MTP profitability is residency-dependent — don't trust a spec-decode
+  benchmark taken under page-cache thrash.** On full-pool planes (97 GB/rank
+  > cache) MTP *loses* (~-17% at TP2 k=1; 3.65 vs 4.9-5.5 under PP2 k=2):
+  verify's extra expert reads amplify NVMe faulting. On pruned resident
+  planes the same MTP k=1 is **+31%** (11.4 → 15.0, ~68% acceptance). The
+  PP2 fallback still runs without MTP for this reason.
+- Expert selection for the prune is frequency-based (traffic-cold, measured
+  over 5.3k tok / 12 domains at k=8), not REAP-saliency; ~5.9% of routed
+  slot traffic renormalizes onto kept experts (worst layer 12%). REAP
+  calibration is the open upside track, not a blocker.
+- Reduced top-k (`num_experts_per_tok` override) scales speed linearly in
+  bytes but **collapses quality below k≈6** (k=4: broken arithmetic,
+  hallucinated facts). The pruned-pool route made it unnecessary — routing
+  ships at native k=8.
+- Measurement footguns (each cost us a session): rates are settle- and
+  prompt-domain-dependent (measure post-settle, ×2); a node up 5+ days
+  degrades bandwidth (reboot before trusting absolutes); Firefox on the
+  head node steals ~40% of LPDDR5X bandwidth; count tokens via
+  `usage.completion_tokens`, never SSE frames.
+- Cold long-prompt TTFT is minutes on full-pool planes (~95 GiB/rank of
+  plane faults, ~150 s per 512-tok chunk). Pruned planes largely fix this;
+  still run `spark/warm-planes.sh` after any cache purge, and don't mistake
+  a cold prefill for a hang.
 - 8K context configs; KV is tiny (MLA), so longer windows are mostly a
   matter of raising `--kv-cache-memory-bytes` and `--max-model-len`.
-- 2-bit quality: upstream's QUANT_PROBE numbers (MTP acceptance ≥ FP4
-  baseline); we've verified coherence + arithmetic on-device, not full evals.
+- Quality on the shipped pruned+MTP config, measured on-device:
+  correctness battery clean, GSM8K 91% strict / 92% flexible (300 ex,
+  `max_gen_toks=6000` — thinking models score garbage under default gen
+  caps). GPQA-Diamond / MMLU-Pro / IFEval runs in progress; scores land in
+  the How To Spark evals page and the HF model card
+  (`sapidlabs/GLM-5.2-2bit-MoE-planes-pruned208-tp2`).
