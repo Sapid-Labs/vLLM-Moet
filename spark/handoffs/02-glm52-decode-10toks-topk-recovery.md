@@ -7,7 +7,45 @@ GLM-5.2 single-stream decode **≥ 10 tok/s** on the two DGX Sparks (TP2), at
 problem is recovering quality at low top-k. Ends when a config sustains
 ≥10 tok/s and passes `spark/mtp_correctness_battery.py --model glm-5.2`.
 
-## State (2026-07-12, session 6b — RESIDENCY ANOMALY SOLVED: the bottleneck is page-cache thrash, not LPDDR bandwidth)
+## State (2026-07-13, session 7 — k=8 traffic CDF MEASURED: routing is much flatter than assumed; prune ratio picked at 48/layer)
+
+Ran session-6b next-step #1: rebooted serve at NATIVE k=8 with
+`--enable-return-routed-experts` (flag verified end-to-end; capturer hooks
+`router.set_capture_fn`, works under FULL cudagraphs + moe_w2 — confirmed
+non-null on a live request). Captured routing for **5,293 tokens across 12
+domains** (essay/code×2/math/factual/fiction/json/dialogue/translation/
+science/legal/recipe, 400 gen tok each, temp 0.7 seed 42). Data + scripts:
+`spark/routing/` (capture_routing.py, analyze_routing.py,
+`capture-k8-20260713/` incl. per-domain npy + summed counts). Findings:
+
+- **The "90% of tokens through 20% of experts" code comment is WRONG for
+  real traffic.** Measured CDF (per-(layer,expert) slot counts, 75 MoE
+  layers × 256 experts): 50% of traffic needs **27.4%** of cells, 90% needs
+  **72.6%**, 99% needs 93.5%. Only 5/19200 cells never routed. Routing is
+  FLAT, not skewed.
+- **Prune sweep (coldest-N-per-layer):** N=32 → 84.9 GB/rank, loses 3.2% of
+  routed slots; **N=48 → 78.8 GB/rank (residency target), loses 5.9%**
+  (worst layer 12.0%); N=56 → 75.8 GB, 7.4% (worst 14.3%). So full
+  residency costs ~6% of routed traffic exposure — NOT negligible, but well
+  inside what REAP papers/community prunes survive (0xSero pruned 34%), and
+  slot counts OVERSTATE damage: they weight the 8th-gate slot same as the
+  1st, and pruned tokens renormalize onto kept experts rather than vanish.
+- **Cold set is domain-stable:** every domain sends 5.9–9.3% of its traffic
+  to the global-cold-56 set (no domain catastrophically depends on it).
+  Frequency-only pruning is therefore *plausible* as a residency smoke test,
+  but the 6-7% exposure says use REAP saliency for the real selection.
+- **Native k=8 quality re-confirmed clean** during capture: 24×17=408,
+  391/17=23, 1001=7×11×13 all correct, prose coherent (the exact probes k≤4
+  fails).
+- **Routing-array format gotcha:** shape is (tokens-1, **78**, 8) — the
+  first 3 rows are the DENSE layers, all-zero placeholders. Strip
+  `[:, 3:, :]` before counting or expert 0 gets 8×tokens phantom hits.
+- **Decision: target prune = 48/layer (keep 208), planes → ~78.8 GB/rank**;
+  post-prune THP budget 78.8+32 ≈ 111 < 121 GB also fits. Next: REAP
+  saliency calibration to choose WHICH 48 (per layer), not hit counts.
+- Server left RUNNING at native k=8 with routing capture on.
+
+## Prior state (2026-07-12, session 6b — RESIDENCY ANOMALY SOLVED: the bottleneck is page-cache thrash, not LPDDR bandwidth)
 
 Chased why k4/k8 ≈ 2.9× (superlinear vs the 1.8× bytes prediction). Answer, with
 direct evidence:
@@ -203,18 +241,33 @@ Key findings this session:
   tok/s — proven by two identical back-to-back k=8 runs (2.63 then 4.23).
   Desktop Firefox on `.1` steals shared LPDDR5X bandwidth (−40%).
 
-## Next steps (ranked, updated session 6b)
+## Next steps (ranked, updated session 7)
 
-NEW #1: **Measure cold-expert traffic share at k=8** — reboot serve with
-`--enable-return-routed-experts` (native k=8), generate a few thousand tokens
-across diverse domains, decode each choice's `routed_experts` (base64 npy,
-`(tokens-1, layers, top_k)`), build the per-(layer,expert) traffic CDF. This
-picks the pool-prune ratio (target: planes ≤ ~78 GB/rank ⇒ prune ~56 experts/
-layer-equivalent) and quantifies the traffic the pruned set loses. Then the
-REAP saliency calibration (track below) chooses WHICH experts, properly.
-NEW #2: after pruning lands: re-prepack planes, verify full residency (zero
-`nvme0n1` sectors during decode — the smoking-gun metric from this session),
-then try `VLLM_MOE_W2_PLANES_THP=1` for the 170 GB/s tier.
+1. **REAP saliency calibration of GLM-5.2 to pick the 48-per-layer prune set.**
+   `~/Dev/reap` branch `add-glm_moe_dsa-support` (ec1ad70) is ported and
+   smoke-tested. Needs: layer-wise disk streaming (194 GB model > 128 GB RAM),
+   calib set split across both Sparks, additive observer-stat merge. Compare
+   the REAP-picked set against the frequency-cold set
+   (`spark/routing/capture-k8-20260713/counts_layer_expert.npy`) as a sanity
+   check — large disagreement means slot counts were misleading, small means
+   either works.
+   - Optional fast pre-check: frequency-only prune of the cold-48 as a pure
+     residency smoke test (re-prepack, verify zero NVMe faults + speed at
+     k=8) before investing in calibration. Quality of that artifact is NOT
+     trustworthy; it only tests the residency→speed hypothesis.
+2. **After pruning lands:** re-prepack planes (`spark/prepack_planes.py`
+   variant that drops pruned experts + remaps router indices), verify full
+   residency (zero `nvme0n1` sectors during decode — the smoking-gun metric),
+   then `VLLM_MOE_W2_PLANES_THP=1` for the ~170 GB/s tier.
+3. Keep the k=4 recovery finetune parked unless pruned-k=8 misses 10 tok/s.
+
+## Old next steps (session 6b)
+
+~~NEW #1: Measure cold-expert traffic share at k=8~~ **DONE session 7** (see
+State: CDF flat, prune=48/layer picked, 5.9% slot-traffic exposure).
+NEW #2 (now #2 above): after pruning lands: re-prepack planes, verify full
+residency (zero `nvme0n1` sectors during decode), then
+`VLLM_MOE_W2_PLANES_THP=1` for the 170 GB/s tier.
 
 ## Old next steps (session 6)
 

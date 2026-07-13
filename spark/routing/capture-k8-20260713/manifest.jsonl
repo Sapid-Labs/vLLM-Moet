@@ -1,0 +1,12 @@
+{"name": "essay_bandwidth", "wall_s": 185.99, "prompt_tokens": 40, "completion_tokens": 400, "has_routing": true, "shape": [439, 78, 8], "dtype": "uint8"}
+{"name": "code_python", "wall_s": 112.73, "prompt_tokens": 35, "completion_tokens": 400, "has_routing": true, "shape": [434, 78, 8], "dtype": "uint8"}
+{"name": "code_rust", "wall_s": 110.54, "prompt_tokens": 29, "completion_tokens": 400, "has_routing": true, "shape": [428, 78, 8], "dtype": "uint8"}
+{"name": "math_reasoning", "wall_s": 133.75, "prompt_tokens": 80, "completion_tokens": 400, "has_routing": true, "shape": [479, 78, 8], "dtype": "uint8"}
+{"name": "factual_qa", "wall_s": 145.32, "prompt_tokens": 56, "completion_tokens": 400, "has_routing": true, "shape": [455, 78, 8], "dtype": "uint8"}
+{"name": "fiction", "wall_s": 107.89, "prompt_tokens": 35, "completion_tokens": 400, "has_routing": true, "shape": [434, 78, 8], "dtype": "uint8"}
+{"name": "json_structured", "wall_s": 110.6, "prompt_tokens": 38, "completion_tokens": 400, "has_routing": true, "shape": [437, 78, 8], "dtype": "uint8"}
+{"name": "dialogue_support", "wall_s": 124.46, "prompt_tokens": 40, "completion_tokens": 400, "has_routing": true, "shape": [439, 78, 8], "dtype": "uint8"}
+{"name": "translation_style", "wall_s": 120.36, "prompt_tokens": 49, "completion_tokens": 400, "has_routing": true, "shape": [448, 78, 8], "dtype": "uint8"}
+{"name": "science_explain", "wall_s": 126.36, "prompt_tokens": 40, "completion_tokens": 400, "has_routing": true, "shape": [439, 78, 8], "dtype": "uint8"}
+{"name": "legal_brief", "wall_s": 125.23, "prompt_tokens": 30, "completion_tokens": 400, "has_routing": true, "shape": [429, 78, 8], "dtype": "uint8"}
+{"name": "recipe_howto", "wall_s": 106.34, "prompt_tokens": 33, "completion_tokens": 400, "has_routing": true, "shape": [432, 78, 8], "dtype": "uint8"}
