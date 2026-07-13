@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# GLM-5.2 (753B) across TWO DGX Sparks — TENSOR parallel over the 200G
-# fabric (replaces PP2's pipeline bubble with ~156 tiny allreduces/token;
-# measured 20 us/op on this RoCE link => ~3 ms/token of comm vs the ~43 ms
-# serial second-rank read PP2 pays; both ranks read their expert halves in
-# parallel).
+# GLM-5.2 (753B) TP2 across both Sparks + MTP speculative decode.
 #
-# Needs the TP2-sharded planes on BOTH nodes:
-#   spark/prepack_planes.py --model ~/models/hf/GLM-5.2-FP8 \
-#     --tp-rank <0 on .1 / 1 on .2> --tp-size 2
-# (writes $MODEL/moe_w2_planes_tp2; w2 shards to K=1024 -> k1024 cubins).
-# Bring the Ray cluster up first: spark/start-ray-cluster.sh
+# Same TP2 path as serve-glm52-tp2.sh (NCCL 2.30.7 via raylet fixes the FULL-
+# graph replay hang; TP-sharded planes; both ranks read expert halves in
+# parallel). Adds GLM's native next-n-predict drafter (config has
+# num_nextn_predict_layers=1 -> k=1 is the native, best-read-economics case).
 #
-# usage: serve-glm52-tp2.sh [--eager] [extra vllm args...]
+# WHY this might NOT help: the stack is weight-read-bound (~193 ms/token, 96%
+# GPU both nodes at TP2 single-stream). A k=1 verify step processes 2 positions
+# -> up to ~2x expert-weight reads for (1+acceptance)x tokens. A prior k=2 test
+# under PP LOST (3x reads / 2.2x tokens -> 3.65 vs 4.9-5.5 tok/s). k=1 is the
+# most favorable case and is untested under TP2 — this measures acceptance rate
+# and tok/s to settle it.
+#
+# Needs the TP2-sharded planes on BOTH nodes and the Ray cluster up
+# (start-ray-cluster.sh — it carries VLLM_NCCL_SO_PATH=~/nccl-2.30.7 + GIDs).
+#
+# usage: serve-glm52-tp2-mtp.sh [--eager] [--no-mtp] [extra vllm args...]
+#   MTP_K env overrides num_speculative_tokens (default 1).
 set -euo pipefail
 
 VENV="$HOME/venvs/vllm-moet"
@@ -22,14 +28,10 @@ export VLLM_MOE_W2=1
 export VLLM_MOE_W2_DELTA_GB=0
 export VLLM_MOE_W2_CUBIT_DIR="$REPO/kernels/cubins-sm120"
 export VLLM_MOE_W2_PREPACKED_DIR="$MODEL/moe_w2_planes_tp2"
-export VLLM_MOE_W2_PLANES_MMAP=1   # file-backed planes (same budget as PP2:
-                                   # each rank holds HALF of EVERY layer)
+export VLLM_MOE_W2_PLANES_MMAP=1
 export VLLM_MOE_W2_FADVISE_GLOB="$MODEL/*.safetensors"
 export MALLOC_MMAP_THRESHOLD_=65536
 
-# fabric plumbing — same as PP2, but now latency-critical (allreduce per
-# layer). Peer-side env (GID index 5) lives on the raylet via
-# start-ray-cluster.sh.
 export VLLM_HOST_IP=192.168.100.1
 export NCCL_SOCKET_IFNAME=enp1s0f1np1
 export GLOO_SOCKET_IFNAME=enp1s0f1np1
@@ -37,12 +39,9 @@ export RAY_memory_monitor_refresh_ms=0
 export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA=rocep1s0f1
 export NCCL_IB_GID_INDEX=3
-# FULL_AND_PIECEWISE runs decode collectives INSIDE cuda graphs and prefill/
-# piecewise collectives EAGERLY on the SAME communicator. Without graph-mixing
-# support NCCL can service captured/uncaptured ops out of order on the proxy and
-# deadlock (observed: both ranks stall at the same AllGather opCount, GPUs idle,
-# RoCE flat). Required for FULL graphs cross-node. Overridable from the env.
 export NCCL_GRAPH_MIXING_SUPPORT="${NCCL_GRAPH_MIXING_SUPPORT:-1}"
+
+MTP_K="${MTP_K:-1}"
 
 ARGS=(
   --served-model-name glm-5.2 --trust-remote-code
@@ -53,6 +52,12 @@ ARGS=(
   --max-num-batched-tokens 512 --max-num-seqs 8
   --host 0.0.0.0 --port 8000
 )
+
+if [[ "${1:-}" == "--no-mtp" ]]; then
+  shift
+else
+  ARGS+=(--speculative-config "{\"method\": \"mtp\", \"num_speculative_tokens\": $MTP_K}")
+fi
 
 if [[ "${1:-}" == "--eager" ]]; then
   shift
