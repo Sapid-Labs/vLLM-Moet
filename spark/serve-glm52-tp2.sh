@@ -21,7 +21,7 @@ MODEL="$HOME/models/hf/GLM-5.2-FP8"
 export VLLM_MOE_W2=1
 export VLLM_MOE_W2_DELTA_GB=0
 export VLLM_MOE_W2_CUBIT_DIR="$REPO/kernels/cubins-sm120"
-export VLLM_MOE_W2_PREPACKED_DIR="$MODEL/moe_w2_planes_tp2"
+export VLLM_MOE_W2_PREPACKED_DIR="${VLLM_MOE_W2_PREPACKED_DIR:-$MODEL/moe_w2_planes_tp2}"
 export VLLM_MOE_W2_PLANES_MMAP=1   # file-backed planes (same budget as PP2:
                                    # each rank holds HALF of EVERY layer)
 export VLLM_MOE_W2_FADVISE_GLOB="$MODEL/*.safetensors"

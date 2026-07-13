@@ -7,7 +7,41 @@ GLM-5.2 single-stream decode **≥ 10 tok/s** on the two DGX Sparks (TP2), at
 problem is recovering quality at low top-k. Ends when a config sustains
 ≥10 tok/s and passes `spark/mtp_correctness_battery.py --model glm-5.2`.
 
-## State (2026-07-13, session 7 — k=8 traffic CDF MEASURED: routing is much flatter than assumed; prune ratio picked at 48/layer)
+## State (2026-07-13, session 7b — **TARGET MET: 11.44 tok/s sustained at NATIVE k=8, battery CLEAN**, via frequency-pruned 208-expert planes)
+
+The residency smoke test didn't just validate the hypothesis — it hit the
+full goal. Config: pool-pruned planes (coldest-48-per-layer by measured k=8
+traffic, `spark/routing/keep208.json`), native k=8 routing, TP2 FULL
+cudagraphs.
+
+- **Sustained decode 11.44 / 11.45 tok/s** (512→1024 differential ×2, essay
+  domain, post-settle — the exact protocol that gave k=8=3.1 and k=4=7.8-9.8
+  before). Settle runs dead-flat (400 tok in 35.3 s ×3). **1024-tok
+  generations no longer thrash**: NVMe reads 0–9 MiB per differential pair
+  (was 1–2 GiB). Planes 79 GB/rank < ~88 GB cache ⇒ fully resident, as
+  predicted.
+- **Battery VERDICT: CLEAN** (arithmetic/fact/prose all PASS) + free-form
+  probes clean (24×17=408, 391/17=23, 1001=7·11·13, Rayleigh prose). This is
+  NATIVE k=8 routing minus 5.9% slot traffic — categorically gentler than
+  the k=4 collapse. (Battery is still the shallow one; deeper eval optional.)
+- **How pruning works at runtime** (`spark/pool-prune-runtime.patch`, applied
+  to BOTH venvs): planes row-compacted to keep-list order
+  (`spark/routing/prune_planes.py` — row-select from existing planes, no
+  requant, ~15 min); loader reads meta "keep", masks
+  `e_score_correction_bias` of pruned experts by −1e9 (selection-only, gate
+  weights renormalize over kept — REAP-style pool prune), remaps ids→compact
+  rows via LUT gather in `_moe_w2_forward_timed` (cudagraph-safe). Verified:
+  0 routed ids outside keep set on live capture.
+- **Serve:** `VLLM_MOE_W2_PREPACKED_DIR=$HOME/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208
+  bash spark/serve-glm52-tp2.sh --enable-return-routed-experts` (script now
+  respects a pre-set PREPACKED_DIR). Planes dir exists on both nodes; boot
+  logs "POOL-PRUNED 256->208" ×75 on both ranks.
+- **Caveat:** expert selection is frequency-based (smoke-test quality). REAP
+  saliency selection (next steps) may pick a better set; current quality
+  already gates CLEAN, so that's now an upside option, not a blocker.
+- Server left RUNNING on pruned planes, native k=8, capture on.
+
+## Prior state (2026-07-13, session 7 — k=8 traffic CDF MEASURED: routing is much flatter than assumed; prune ratio picked at 48/layer)
 
 Ran session-6b next-step #1: rebooted serve at NATIVE k=8 with
 `--enable-return-routed-experts` (flag verified end-to-end; capturer hooks
@@ -241,8 +275,13 @@ Key findings this session:
   tok/s — proven by two identical back-to-back k=8 runs (2.63 then 4.23).
   Desktop Firefox on `.1` steals shared LPDDR5X bandwidth (−40%).
 
-## Next steps (ranked, updated session 7)
+## Next steps (ranked, updated session 7b — target met; all items are now upside)
 
+0. **THP tier attempt (biggest remaining speed lever):**
+   `VLLM_MOE_W2_PLANES_THP=1` now FITS post-prune (79 anon planes + 32 other
+   ≈ 111 < 121 GB): 2 MiB anon pages restore ~170 GB/s ATS reads vs 4 KiB
+   file pages. If boot OOMs or decode regresses, drop back to the mmap
+   config above (known-good 11.44).
 1. **REAP saliency calibration of GLM-5.2 to pick the 48-per-layer prune set.**
    `~/Dev/reap` branch `add-glm_moe_dsa-support` (ec1ad70) is ported and
    smoke-tested. Needs: layer-wise disk streaming (194 GB model > 128 GB RAM),
