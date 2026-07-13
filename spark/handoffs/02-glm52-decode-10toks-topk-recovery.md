@@ -7,7 +7,50 @@ GLM-5.2 single-stream decode **≥ 10 tok/s** on the two DGX Sparks (TP2), at
 problem is recovering quality at low top-k. Ends when a config sustains
 ≥10 tok/s and passes `spark/mtp_correctness_battery.py --model glm-5.2`.
 
-## State (2026-07-12, session 6 — post-reboot re-baseline; k=4 = 8.5–9.8 sustained)
+## State (2026-07-12, session 6b — RESIDENCY ANOMALY SOLVED: the bottleneck is page-cache thrash, not LPDDR bandwidth)
+
+Chased why k4/k8 ≈ 2.9× (superlinear vs the 1.8× bytes prediction). Answer, with
+direct evidence:
+
+- **Planes (97 GB/rank) don't fit in page cache (~88 GB available)** → decode
+  continuously faults cold experts from NVMe, and **tok/s tracks fault volume
+  almost linearly**. Measured at k=4, one prompt repeated 6× (256 tok each):
+  disk 2011→1331→1186→1074→695→**19 MiB** as rate went 7.25→…→**11.50 tok/s
+  (incl prefill)**. Fresh prompt domain: ~14 MiB/token faulted; "settled"
+  domains get re-evicted by any excursion to another domain. This one
+  mechanism explains the settling effect, the ±30% prompt-domain spread, the
+  k=8 uptime "degradation", AND the superlinear k=4 ratio (k=4's per-domain
+  working set mostly fits; k=8's cannot).
+- **Fault-free k=4 clears the target** (11.5 tok/s incl prefill on 256-tok
+  runs) — but only in a bounded domain: 512/1024-tok generations expand the
+  union working set past cache again (6.6 GiB faulted, back to 7.5 sustained).
+  The residency deficit is only ~5–15 GB.
+- **Why ATS reads are slow even when cached** (from moe_w2_cubit.py comments,
+  measured by the author): file-backed 4 KiB pages make GPU ATS reads
+  **10–25× slower** than raw (`decode moe_w2_mm 7.4 ms median vs sub-ms`);
+  2 MiB THP pages restore ~170 GB/s (`VLLM_MOE_W2_PLANES_THP=1`) but require
+  full anon residency — currently impossible (97 planes + 32 other > 121).
+  The old "26 ms warm reads" estimate was the THP number; 193 ms/tok reality
+  is 4 KiB pages + faults.
+- **STRATEGY SHIFT — pool-REAP is back, and it may beat the k=4 finetune.**
+  Session-5 verdict #3 rejected pool pruning because it doesn't cut per-token
+  bytes. But the bottleneck is *residency*, not bytes: pruning ~20–25% of the
+  coldest experts (256→~200) shrinks planes 97→~78 GB/rank → fully
+  cache-resident → fault-free at any generation length and prompt domain, at
+  NATIVE k=8 routing (tiny quality cost vs the k=4 collapse). And post-prune,
+  THP anon residency fits (78+32≈110 < 121) → ~170 GB/s reads → k=8 projected
+  well past 10 tok/s. Code comment corroborates skew: "GLM routes ~90% of
+  tokens through ~20% of experts".
+- Also catalogued (moe_w2_delta.py): a GPU **base cache** exists
+  (`VLLM_MOE_W2_BASE_CACHE_GB`, pinned-host planes + GPU slot pool +
+  miss-replay) but is unusable at current plane size (pinned 97 GB + pool
+  doesn't fit); delta tier disabled (`VLLM_MOE_W2_DELTA_GB=0`). Routing can be
+  captured per-token via `--enable-return-routed-experts` (returns base64 npy
+  `(tokens-1, layers, top_k)` per completion) — the tool for measuring
+  cold-expert traffic share before choosing a prune ratio.
+- Server left RUNNING at k=4.
+
+## Prior state (2026-07-12, session 6 — post-reboot re-baseline; k=4 = 8.5–9.8 sustained)
 
 Node `.1` was rebooted before this session (the session-5 gate). Findings:
 
@@ -160,7 +203,20 @@ Key findings this session:
   tok/s — proven by two identical back-to-back k=8 runs (2.63 then 4.23).
   Desktop Firefox on `.1` steals shared LPDDR5X bandwidth (−40%).
 
-## Next steps (ranked, updated session 6)
+## Next steps (ranked, updated session 6b)
+
+NEW #1: **Measure cold-expert traffic share at k=8** — reboot serve with
+`--enable-return-routed-experts` (native k=8), generate a few thousand tokens
+across diverse domains, decode each choice's `routed_experts` (base64 npy,
+`(tokens-1, layers, top_k)`), build the per-(layer,expert) traffic CDF. This
+picks the pool-prune ratio (target: planes ≤ ~78 GB/rank ⇒ prune ~56 experts/
+layer-equivalent) and quantifies the traffic the pruned set loses. Then the
+REAP saliency calibration (track below) chooses WHICH experts, properly.
+NEW #2: after pruning lands: re-prepack planes, verify full residency (zero
+`nvme0n1` sectors during decode — the smoking-gun metric from this session),
+then try `VLLM_MOE_W2_PLANES_THP=1` for the 170 GB/s tier.
+
+## Old next steps (session 6)
 
 0. ~~Reboot `.1`, re-baseline k=8 and k=4 sustained~~ **DONE session 6:
    k=8 = 3.1 (low, see State), k=4 = 8.5–9.8.** Open sub-question: why is
