@@ -1,78 +1,112 @@
 # HANDOFF — GLM-5.2 on 2× DGX Spark (branch spark-gb10)
 
-Short "resume here" pointer. Deep docs: `spark/GOAL.md` (20 tok/s plan),
-`spark/NVFP4-DENSE.md` (the current lever, full build plan), `spark/RUNBOOK.md`
-(serve/measure), `spark/handoffs/02-*.md` (how we got to 15 tok/s).
+Short "resume here" pointer. Deep docs: `spark/NVFP4-DENSE.md` (the shipped
+lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
+(serve/measure), `spark/handoffs/02-*.md` (how we got to 15).
 
-## STATUS (2026-07-13, session 9)
+## STATUS (2026-07-14, session 10)
 
-Shipped config = TP2 + pruned-208 2-bit experts + MTP k=1 = **15 tok/s**
-(~180 GB total weights, ~90 GB/rank, 2× Spark). New goal: **20 tok/s at same
-quality**. Session 9 established decode is **bandwidth-bound** (dense/attention =
-74% of decode bytes; MLA attention alone ~60%) and set the lever: **NVFP4 the
-dense/attention linears**, experts untouched. Two background jobs running:
-GPQA-Diamond eval (~74% done) and a queued decode profiler (fires after GPQA).
+**GLM-5.2 on 2× Spark now serves ~20 tok/s single-stream (greedy)** — up from
+15 — via **NVFP4 weight-only on the attention + shared-expert linears** (stacks
+on top of the shipped 2-bit pruned experts + MTP). Decode is bandwidth-bound;
+after 2-bit experts, attention was ~60% of per-token bytes at FP8, so 4-bit-ing
+it bought ~1.33×. Progression: FP8-attn 15 → NVFP4 big-3 ~18 → full attn+shared
+~20. **Quality of the NVFP4 build NOT yet evaluated** (weights rel-L1 ~0.09).
 
-## DONE / verified
+- **Server is UP right now** on the full NVFP4 build (`nvfp4_dense_overlay`),
+  TP2, healthy on :8000.
+- **Code pushed:** `Sapid-Labs/vLLM-Moet` branch `spark-gb10` (commit 78345be).
+- **Model pushed:** `sapidlabs/GLM-5.2-NVFP4-attn-experimental` (public,
+  experimental, 8.4 GB NVFP4 attention delta + honest card; upload may still be
+  finishing on nohup — check `~/nvfp4-hf-upload.log`).
 
-- **Byte accounting** (from safetensors headers): per MoE-layer decode read =
-  MLA attn 174.6 MB (60%) + routed-2bit 75.5 (26%) + shared 37.8 (13%) + gate 3.
-  ~23 GB/token → 11.4 tok/s×23 ≈ 262 GB/s ≈ the 273 ceiling. Bandwidth-bound.
-  Overturns the old "52 GB/s / 5× headroom" thesis (that counted only plane bytes).
-- **NVFP4 recon** complete (`spark/NVFP4-DENSE.md`): weight-only W4A16 method
-  `ModelOptNvFp4W4A16LinearMethod` + Marlin kernel already in-tree; extend
-  `Fp8Config.get_quant_method` LinearBase branch; experts stay on the 2-bit hook.
-- **Packer written + validated:** `spark/prepack_nvfp4_linear.py`. Real GLM-5.2
-  attention/shared tensors → NVFP4 rel-L1 ~0.089, byte change 0.56× (matches the
-  ~1.47× decode projection). Reads block-FP8, emits loader-matching tensors.
-- **Not the donor:** `nvidia/GLM-5.2-NVFP4` quantizes the *experts* and keeps
-  attention BF16 — useless as a drop-in; use it only as a BF16 requant *source*.
-- GSM8K eval done: 96% flexible / 91% strict.
+## NEXT (agreed plan — order matters)
 
-## NEXT (immediate, in order)
+**REAP → drafter → eval**, with cheap sanity checks between (full battery only at
+the end; it's slow). Rationale: the drafter is *fit to* the target's output
+distribution, and REAP changes which experts are active → do all target-changing
+steps first, fit the drafter last against the frozen model.
 
-1. Wait for GPQA to finish → watcher reports score. Then the profiler auto-fires;
-   report the 67 ms breakdown + **flat-vs-rising M-scaling** (the bandwidth-bound
-   confirm; this is the go/no-go gate for NVFP4).
-2. If flat/bandwidth-bound: wire the loader hook (extend `Fp8Config` LinearBase
-   branch → NVFP4 W4A16 for the target prefixes), prototype in site-packages,
-   then fold into `patch/vllm-moet-v0.24.0.patch`.
-3. Build overlay: `python spark/prepack_nvfp4_linear.py --out
-   $MODEL/nvfp4_dense_overlay`; mirror to peer. Serve from overlay + 2-bit planes.
-4. Speed-measure (expect ~1.47× → ~18–22 tok/s), then full quality battery.
+1. **REAP (do first)** — replace the frequency-based expert prune (drop 48
+   coldest by traffic) with saliency-based REAP at the same 208 experts, to buy
+   back quality. Quality move, NOT speed (same bytes/token). Tooling in
+   `~/Dev/reap` (branch `add-hy_v3-support` — **check/add GLM-5.2 support**; it
+   was written for Hunyuan hy_v3). Produces a new pruned-plane set → repack via
+   `spark/prepack_planes.py`. Sanity-check after: ~10-20 prompts coherence or
+   GSM8K-50.
+2. **Drafter (second, last model change)** — fine-tune the MTP head (layer 78)
+   against the frozen NVFP4+REAP target to raise MTP acceptance (the real lever
+   for effective throughput; sampled tok/s currently varies ~13-20 with
+   acceptance). Bigger lift than REAP. Sanity-check after.
+3. **Full quality battery (end)** — GPQA + GSM8K + IFEval + MMLU-Pro on the final
+   build. This is the gate for any "same quality" public claim. Run it ALONE
+   (never co-run — session-9 crash) and resumable (`--use_cache`), see below.
 
 ## HOW TO RESUME
 
-- Model: `$HOME/models/hf/GLM-5.2-FP8` (dense FP8 + 2-bit planes
-  `moe_w2_planes_tp2_p208`). Serve: `spark/serve-glm52-tp2-mtp.sh` (needs NCCL
-  2.30.7 via `VLLM_NCCL_SO_PATH`, planes on both nodes, Ray up). See RUNBOOK §4.
-- Served vllm = install at `~/venvs/vllm-moet/lib/python3.12/site-packages/vllm`
-  (stock 0.24.0 + `patch/vllm-moet-v0.24.0.patch`). Repo has NO vllm/ dir; code
-  changes = edit patch (prototype in site-packages first).
-- Packer validate: `python spark/prepack_nvfp4_linear.py --verify --limit-layers 10`.
+**Serve the shipped NVFP4 build (2× Spark, TP2):**
+```bash
+cd ~/Dev/vLLM-Moet; M=~/models/hf/GLM-5.2-FP8
+MODEL=$M/nvfp4_dense_overlay VLLM_MOE_W2_PREPACKED_DIR=$M/moe_w2_planes_tp2_p208 \
+VLLM_NVFP4_DENSE=1 \
+VLLM_NVFP4_TARGETS="o_proj,q_a_proj,q_b_proj,kv_a_proj_with_mqa,kv_b_proj,fused_qkv_a_proj,gate_proj,up_proj,gate_up_proj,down_proj" \
+MTP_K=1 VLLM_ENGINE_READY_TIMEOUT_S=2400 \
+nohup bash spark/serve-glm52-tp2-mtp.sh > ~/serve-nvfp4.log 2>&1 &
+```
+Big-3-only cut = same but `VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj` +
+`MODEL=$M/nvfp4_big3_overlay`. Plain FP8-attn baseline = drop `VLLM_NVFP4_DENSE`
++ `MODEL=$M` + `VLLM_MOE_W2_PREPACKED_DIR=$M/moe_w2_planes_tp2_p208`.
 
-## GOTCHAS / KEY FACTS
+**Measure decode:** use **greedy (temperature 0)** for a clean number (~20);
+sampled (temp>0) varies with MTP acceptance. Settle 3-5 warmups first (Marlin
+FP4 kernels warm slowly). One-liner protocol in session-10 transcript / GOAL.md.
 
-- **Do NOT edit site-packages/vllm while the profiler is pending** — it re-imports
-  on its eager reboot and restores the shipped config on exit.
-- Stay on `Fp8Config`; switching to compressed-tensors config strands the 2-bit
-  expert hook (only Fp8MoEMethod/ModelOptNvFp4FusedMoE carry it).
-- NVFP4 needs weights serialized on disk (no on-the-fly quant). Overlay dir
-  symlinks originals + adds NVFP4 shards + rewrites the index (drop replaced fp8).
-- Eval footgun: `--max-model-len 8192` + `max_gen_toks 6000` overflows on long
-  GPQA prompts (400s → scored wrong). Current GPQA is a slight floor + greedy, so
-  NOT comparable to external temp-1.0 numbers. Rerun with `--max-model-len 12288`
-  for a comparable cell.
+**Rebuild an overlay** (e.g. after REAP changes nothing here, but for new quant):
+`python spark/prepack_nvfp4_linear.py --targets <basenames> --out <dir>` on BOTH
+nodes (deterministic; peer needs the packer copied — it's at `~/prepack_nvfp4_linear.py`).
+
+## GOTCHAS / KEY FACTS (hard-won this session)
+
+- **NVFP4 code lives in site-packages** (`~/venvs/vllm-moet/.../vllm/`), captured
+  in `patch/nvfp4-dense.patch` + `spark/nvfp4_dense_hook.py` (Dockerfile applies
+  both). A fresh vllm install needs them applied. The PEER node's site-packages
+  still has leftover debug prints (`NVFP4HOOKDBG`) — harmless, but re-sync the
+  cleaned files if you rebuild: hook, parameter.py, deepseek_v2.py, deepseek_mtp.py.
+- **Why the overlay works:** vLLM globs ALL *.safetensors (not just the index),
+  so the overlay's NVFP4 tensor AND the symlinked original's fp8 tensor both load.
+  Handled by `NVFP4SKIP2` guard (skip fp8→uint8-param) + `NVFP4ORPHAN` guards
+  (skip fp8 `weight_scale_inv` with no nvfp4 param) in BOTH main + MTP loaders,
+  stacked + non-stacked paths. Don't remove these.
+- **GPU release between serves:** `kill -9` on the APIServer ORPHANS the Ray
+  EngineCore + RayWorkerProc (one holds ~79 GB), which squat the GPUs → next boot
+  fails "Cannot provide a placement group requiring 2.0 GPUs". Kill
+  `EngineCore|RayWorkerProc|vllm serve` by PID on BOTH nodes, then `ray status`
+  should show `0.0/2.0 GPU`.
+- **Ray corrupts across many failed boots** (`ActorHandle ... across Ray
+  sessions`) → `bash spark/start-ray-cluster.sh` (resolves RoCE GIDs, restarts
+  clean).
+- **Fresh NVFP4 compile > 600s** default engine-ready timeout → set
+  `VLLM_ENGINE_READY_TIMEOUT_S=2400` (cached after first boot; ~4 min warm).
+- **GB10 has no native FP4 MMA** → weight-only Marlin FP4 (4-bit read, bf16
+  compute). Correct for bandwidth-bound decode. Adds a little dequant latency
+  (measured 1.2× vs predicted 1.29× for big-3).
+- **Never co-run evals** (session-9: IFEval co-ran with GPQA 5.5h → aiohttp
+  "Session is closed" crash). Run alone, `--use_cache <dir>` + `--log_samples`
+  (resumable), `max_length=8192` matching the server + `max_gen_toks=5000`
+  (avoids the 8192-context overflow 400s), `num_concurrent=4`.
 
 ## CORRECTNESS GATES
 
-- Profiler M-scaling FLAT ⇒ bandwidth-bound ⇒ NVFP4 lever is valid (proceed).
-- NVFP4 serve: speed ≥ ~1.4× baseline on the standard protocol (settle, ×2,
-  usage-token differentials, power.draw > 30W) AND quality battery within noise
-  of the 15 tok/s baseline (GSM8K ≥ ~90%).
+- NVFP4 serve: coherent greedy output (verified — it explains memory-bound
+  inference correctly) + greedy decode ≥ ~1.3× the FP8-attn baseline.
+- After REAP / drafter: cheap sanity (coherence / GSM8K-50) each; full battery
+  within noise of the 15 tok/s baseline (GSM8K ≥ ~90%) at the end.
 
 ## LINKS
 
-- `spark/GOAL.md`, `spark/NVFP4-DENSE.md`, `spark/RUNBOOK.md`,
-  `spark/prepack_nvfp4_linear.py`, `spark/prepack_planes.py` (expert planes),
-  `spark/profile_decode.sh` (queued profiler).
+- `spark/NVFP4-DENSE.md`, `spark/GOAL.md`, `spark/RUNBOOK.md`
+- `spark/prepack_nvfp4_linear.py`, `spark/nvfp4_dense_hook.py`, `patch/nvfp4-dense.patch`
+- HF: `sapidlabs/GLM-5.2-NVFP4-attn-experimental`,
+  `sapidlabs/GLM-5.2-2bit-MoE-planes-pruned208-tp2` (2-bit planes)
+- REAP tooling: `~/Dev/reap` (branch `add-hy_v3-support`)
+- Eval harness: `~/Dev/howtospark/evals/` (run_battery.sh + run_eval.py)
