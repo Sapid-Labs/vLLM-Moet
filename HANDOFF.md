@@ -31,15 +31,25 @@ uncovered two serving-quality problems in the shipped speed stack (below).
   now ships the **big-3 stable** cut (4 shards `nvfp4-dense-000{0..3}`; deleted
   the 6 full-cut shards; corrected card: title, `VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj`,
   coherence-validated + task-battery-pending). Commit `eb2ae11`.
-- **MTP drafter scoping (session 11):** current acceptance on the big-3 build
-  **~84%** at MTP_K=1 (465/554 greedy) → ~1.84 tok/verify (2.0 ceiling). The GLM
-  MTP "head" (layer 78) is a **FULL decoder layer with its own 256-expert MoE**
-  (~9.7B params, 1569 tensors: eh_proj/enorm/hnorm + full attn + full MoE +
-  shared_head) — NOT a small linear head. So "fine-tune the drafter" = train a
-  9.7B MoE layer against the frozen quantized target. At K=1 the ceiling gain is
-  84→~92% (~+4% tok/s); the bigger lever may be MTP_K≥2 / tree spec. No MTP
-  training tooling exists yet — must build data-gen (frozen target hidden states
-  + next-token labels) + a single-layer trainer + overlay integration.
+- **MTP drafter — MEASURED (session 11), verdict: drafter is near-optimal, both
+  levers small.** Big-3+REAP build, warmed (planes resident), greedy, same prompt:
+  | K | tok/s | tok/verify | acceptance |
+  |---|------|-----------|-----------|
+  | 1 | 18.5 | 1.85 | 84.6% (sampled 83.8%) |
+  | 2 | 19.0 | 2.52 | pos0 85.3% / pos1 66.4% |
+  - **Depth (K≥2) is a DEAD END here (~1.03×):** K=2 drafts 1.36× more tok/verify
+    but the extra MTP-head forward — a FULL decoder layer (layer 78: eh_proj +
+    enorm/hnorm + full attn + 256-expert MoE + shared_head, ~9.7B params, run
+    serially/autoregressively with its own TP2 all-reduce) — eats the gain.
+  - **Accuracy fine-tune (K=1) ≈ +4% only:** 84%→~92% accept caps at 1.92/1.85.
+    Not worth training a 9.7B MoE layer for. (MTP already gives ~1.62× over the
+    ~11.4 non-MTP floor; the ~12% gap to the 1.84× ceiling is MTP-forward overhead,
+    a serving/kernel cost, not a drafter-accuracy cost.)
+  - **Recommendation: do NOT build the drafter trainer** — ROI too low. If chasing
+    MTP throughput, the lever is making the MTP *forward cheaper/lower-overhead*
+    (fewer draft-layer experts / TP-free drafter / fused launch), not retraining.
+    Bigger throughput levers live elsewhere (NVFP4 breadth capped at big-3; the
+    non-MTP floor).
 - **Code pushed:** `Sapid-Labs/vLLM-Moet` `spark-gb10`. REAP tooling:
   `~/Dev/reap` `add-glm_moe_dsa-support` (commits `02b838a`,`7f9f567`,`fd2b7f4`).
 - **NEXT:** (a) REAP-vs-frequency quality A/B on the clean FP8 stack (GSM8K-50) —
