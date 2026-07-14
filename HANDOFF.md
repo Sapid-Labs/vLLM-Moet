@@ -27,6 +27,19 @@ uncovered two serving-quality problems in the shipped speed stack (below).
 - **MTP note:** the "Paris1 and1..." garbage-draft interleave appeared only on
   the FULL-cut degraded target; on big-3 MTP is clean. So MTP is fine — its
   earlier garbage was downstream of the full-cut target collapse, not an MTP bug.
+- **HF model updated (session 11):** `sapidlabs/GLM-5.2-NVFP4-attn-experimental`
+  now ships the **big-3 stable** cut (4 shards `nvfp4-dense-000{0..3}`; deleted
+  the 6 full-cut shards; corrected card: title, `VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj`,
+  coherence-validated + task-battery-pending). Commit `eb2ae11`.
+- **MTP drafter scoping (session 11):** current acceptance on the big-3 build
+  **~84%** at MTP_K=1 (465/554 greedy) → ~1.84 tok/verify (2.0 ceiling). The GLM
+  MTP "head" (layer 78) is a **FULL decoder layer with its own 256-expert MoE**
+  (~9.7B params, 1569 tensors: eh_proj/enorm/hnorm + full attn + full MoE +
+  shared_head) — NOT a small linear head. So "fine-tune the drafter" = train a
+  9.7B MoE layer against the frozen quantized target. At K=1 the ceiling gain is
+  84→~92% (~+4% tok/s); the bigger lever may be MTP_K≥2 / tree spec. No MTP
+  training tooling exists yet — must build data-gen (frozen target hidden states
+  + next-token labels) + a single-layer trainer + overlay integration.
 - **Code pushed:** `Sapid-Labs/vLLM-Moet` `spark-gb10`. REAP tooling:
   `~/Dev/reap` `add-glm_moe_dsa-support` (commits `02b838a`,`7f9f567`,`fd2b7f4`).
 - **NEXT:** (a) REAP-vs-frequency quality A/B on the clean FP8 stack (GSM8K-50) —
