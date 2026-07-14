@@ -29,11 +29,30 @@ steps first, fit the drafter last against the frozen model.
 
 1. **REAP (do first)** — replace the frequency-based expert prune (drop 48
    coldest by traffic) with saliency-based REAP at the same 208 experts, to buy
-   back quality. Quality move, NOT speed (same bytes/token). Tooling in
-   `~/Dev/reap` (branch `add-hy_v3-support` — **check/add GLM-5.2 support**; it
-   was written for Hunyuan hy_v3). Produces a new pruned-plane set → repack via
-   `spark/prepack_planes.py`. Sanity-check after: ~10-20 prompts coherence or
-   GSM8K-50.
+   back quality. Quality move, NOT speed (same bytes/token).
+   - **Pipeline (confirmed session 11):** REAP observer → per-layer expert
+     saliency → top-208-per-layer keep-list in `spark/routing/keep208.json`
+     format → `spark/routing/prune_planes.py <src> <dst> <keep.json>` (row-select,
+     no requant, ~15 min) on the FULL `moe_w2_planes_tp2` (still on disk, 97 GB)
+     → serve with the new p208 dir. `spark/prepack_planes.py` packs all experts;
+     it is `prune_planes.py` that applies the keep-list. Run prune_planes on BOTH
+     nodes' tp2 planes (same keep.json; rank-agnostic row-select).
+   - **CODE DONE (session 11, reap `add-glm_moe_dsa-support` @ 02b838a):** GLM-5.2
+     REAP support is complete. Observer/prune registries were already there; the
+     missing piece was the **disk-streaming FP8 path** — the 357B model is >> RAM
+     so calibration must stream layer-by-layer from disk, but `disk_stream` had no
+     GLM converter and no FP8 dequant (it cast raw float8 bytes, ignoring
+     `weight_scale_inv`). Added block-wise FP8 dequant + `glm_converter` (fuses
+     per-expert gate/up/down into native batched params); 4 GLM smoke tests pass
+     (incl. a synthetic real-layout FP8 checkpoint matched to bf16 ref, rel-L1
+     <5%); hy3 tests still green. Env: run reap with **`~/venvs/hf/bin/python`
+     `PYTHONPATH=src`** (reap not pip-installed; that venv has pytest+transformers
+     w/ GlmMoeDsa).
+   - **NEXT CONCRETE STEP:** run the observer on `~/models/hf/GLM-5.2-FP8` via
+     `python -m reap.layerwise_prune --disk_stream ... --run_observer_only true`
+     (needs the GPUs → **take down the live NVFP4 server first**; mind the Ray
+     GPU-release footgun). Then saliency→keep-list→prune_planes. Sanity-check
+     after: ~10-20 prompts coherence or GSM8K-50.
 2. **Drafter (second, last model change)** — fine-tune the MTP head (layer 78)
    against the frozen NVFP4+REAP target to raise MTP acceptance (the real lever
    for effective throughput; sampled tok/s currently varies ~13-20 with
@@ -108,5 +127,5 @@ nodes (deterministic; peer needs the packer copied — it's at `~/prepack_nvfp4_
 - `spark/prepack_nvfp4_linear.py`, `spark/nvfp4_dense_hook.py`, `patch/nvfp4-dense.patch`
 - HF: `sapidlabs/GLM-5.2-NVFP4-attn-experimental`,
   `sapidlabs/GLM-5.2-2bit-MoE-planes-pruned208-tp2` (2-bit planes)
-- REAP tooling: `~/Dev/reap` (branch `add-hy_v3-support`)
+- REAP tooling: `~/Dev/reap` (branch `add-glm_moe_dsa-support`)
 - Eval harness: `~/Dev/howtospark/evals/` (run_battery.sh + run_eval.py)
