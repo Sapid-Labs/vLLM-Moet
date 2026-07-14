@@ -22,7 +22,7 @@ set -euo pipefail
 
 VENV="$HOME/venvs/vllm-moet"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL="$HOME/models/hf/GLM-5.2-FP8"
+MODEL="${MODEL:-$HOME/models/hf/GLM-5.2-FP8}"
 
 export VLLM_MOE_W2=1
 export VLLM_MOE_W2_DELTA_GB=0

@@ -70,11 +70,17 @@ RUN pip install --no-cache-dir --break-system-packages flashinfer-python==0.6.14
         "flashinfer-jit-cache==0.6.14+cu130"
 
 # 3. our patch, applied to the installed package (pure-Python delta)
+#    + the NVFP4-dense add-on (attention/shared weight-only NVFP4; see
+#    spark/NVFP4-DENSE.md). The add-on is a small diff + one new module.
 COPY patch/vllm-moet-v0.24.0.patch /tmp/vllm-moet.patch
+COPY patch/nvfp4-dense.patch /tmp/nvfp4-dense.patch
+COPY spark/nvfp4_dense_hook.py /tmp/nvfp4_dense_hook.py
 RUN cd "$(python3 -c 'import vllm, os; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
     && git apply --verbose /tmp/vllm-moet.patch \
-    && python3 -c "from vllm.model_executor.layers.quantization.utils import moe_w2_cubit; print('moe_w2 hook OK')" \
-    && rm /tmp/vllm-moet.patch
+    && git apply --verbose /tmp/nvfp4-dense.patch \
+    && cp /tmp/nvfp4_dense_hook.py vllm/model_executor/layers/quantization/utils/ \
+    && python3 -c "from vllm.model_executor.layers.quantization.utils import moe_w2_cubit, nvfp4_dense_hook; print('moe_w2 + nvfp4 hooks OK')" \
+    && rm /tmp/vllm-moet.patch /tmp/nvfp4-dense.patch /tmp/nvfp4_dense_hook.py
 
 # 4. SM120 cubins (moe_w2/w4 GEMMs incl. K=6144 for GLM-5.x)
 COPY kernels/cubins-sm120/ /cubit-share/

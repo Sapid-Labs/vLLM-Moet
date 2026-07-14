@@ -1,0 +1,132 @@
+--- a/vllm/model_executor/layers/quantization/fp8.py
++++ b/vllm/model_executor/layers/quantization/fp8.py
+@@ -186,6 +186,12 @@
+                 fused_mapping=self.packed_modules_mapping,
+             ):
+                 return UnquantizedLinearMethod()
++            from vllm.model_executor.layers.quantization.utils import (
++                nvfp4_dense_hook,
++            )
++            _m = nvfp4_dense_hook.maybe_linear_method(prefix)
++            if _m is not None:
++                return _m
+             if not self.is_checkpoint_fp8_serialized:
+                 from vllm.model_executor.layers.quantization.online.fp8 import (
+                     Fp8PerTensorOnlineLinearMethod,
+--- a/vllm/model_executor/parameter.py
++++ b/vllm/model_executor/parameter.py
+@@ -97,16 +97,22 @@
+         self.data.copy_(loaded_weight)
+ 
+     def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         if self.data.dtype == torch.uint8 and loaded_weight.dtype != torch.uint8:
+             return  # NVFP4SKIP: fp8 duplicate of an nvfp4-packed weight (overlay)
+         self._assert_and_load(loaded_weight)
+ 
+     def load_row_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         if self.data.dtype == torch.uint8 and loaded_weight.dtype != torch.uint8:
+             return  # NVFP4SKIP: fp8 duplicate of an nvfp4-packed weight (overlay)
+         self._assert_and_load(loaded_weight)
+ 
+     def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         if self.data.dtype == torch.uint8 and loaded_weight.dtype != torch.uint8:
+             return  # NVFP4SKIP: fp8 duplicate of an nvfp4-packed weight (overlay)
+         self._assert_and_load(loaded_weight)
+@@ -152,6 +158,8 @@
+         return self._output_dim
+ 
+     def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         shard_size = self.data.shape[self.output_dim]
+         loaded_weight = loaded_weight.narrow(
+             self.output_dim, self.tp_rank * shard_size, shard_size
+@@ -160,6 +168,8 @@
+         self.data.copy_(loaded_weight)
+ 
+     def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         shard_offset: int = kwargs["shard_offset"]
+         shard_size: int = kwargs["shard_size"]
+ 
+@@ -224,6 +234,8 @@
+         return self._input_dim
+ 
+     def load_row_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         shard_size = self.data.shape[self.input_dim]
+         loaded_weight = loaded_weight.narrow(
+             self.input_dim, self.tp_rank * shard_size, shard_size
+@@ -477,18 +489,24 @@
+         self.local_tensors.add(data)
+ 
+     def load_column_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         assert len(self.partitions) == 1 and 0 in self.partitions
+         partition = self.partitions[0]
+ 
+         ModelWeightParameter.load_column_parallel_weight(partition, loaded_weight)
+ 
+     def load_row_parallel_weight(self, loaded_weight: torch.Tensor):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         assert len(self.partitions) == 1 and 0 in self.partitions
+         partition = self.partitions[0]
+ 
+         ModelWeightParameter.load_row_parallel_weight(partition, loaded_weight)
+ 
+     def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
++        if getattr(self, "data", None) is not None and self.data.dtype == torch.uint8 and hasattr(loaded_weight, "dtype") and loaded_weight.dtype != torch.uint8:
++            return  # NVFP4SKIP2: skip fp8 duplicate of nvfp4-packed weight
+         partition_id = kwargs.pop("shard_id")
+         partition_id = self._shard_id_as_int(partition_id)
+         partition = self.partitions[partition_id]
+--- a/vllm/model_executor/models/deepseek_v2.py
++++ b/vllm/model_executor/models/deepseek_v2.py
+@@ -1456,6 +1456,8 @@
+                 if is_pp_missing_parameter(name, self):
+                     continue
+ 
++                if name not in params_dict:
++                    continue  # NVFP4ORPHAN: fp8 weight_scale_inv, no nvfp4 param
+                 param = params_dict[name]
+                 weight_loader = param.weight_loader
+                 weight_loader(param, loaded_weight, shard_id)
+@@ -1567,6 +1569,8 @@
+                         if is_pp_missing_parameter(name, self):
+                             continue
+ 
++                        if name not in params_dict:
++                            continue  # NVFP4ORPHAN: fp8 weight_scale_inv with no nvfp4 param
+                         param = params_dict[name]
+                         weight_loader = getattr(
+                             param, "weight_loader", default_weight_loader
+--- a/vllm/model_executor/models/deepseek_mtp.py
++++ b/vllm/model_executor/models/deepseek_mtp.py
+@@ -349,6 +349,8 @@
+                 if name.endswith(".bias") and name not in params_dict:
+                     continue
+ 
++                if name not in params_dict:
++                    continue  # NVFP4ORPHAN: fp8 weight_scale_inv, no nvfp4 param
+                 param = params_dict[name]
+                 weight_loader = param.weight_loader
+                 weight_loader(param, loaded_weight, shard_id)
+@@ -460,6 +462,8 @@
+                         ):
+                             continue
+ 
++                        if name not in params_dict:
++                            continue  # NVFP4ORPHAN
+                         param = params_dict[name]
+                         weight_loader = getattr(
+                             param, "weight_loader", default_weight_loader

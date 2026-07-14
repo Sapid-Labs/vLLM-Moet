@@ -5,16 +5,26 @@ across **two**, using vLLM-Moet's 2-bit expert kernels. Everything here is
 measured on real hardware (GB10, sm_121, 121 GiB unified LPDDR5x per node,
 CUDA 13, driver 580.159.03).
 
-**Status (2026-07-13):**
+**Status (2026-07-14):**
 - DeepSeek-V4-Flash, 1 Spark: **working** — coherent greedy output,
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
-- GLM-5.2, 2 Sparks (TP2): **working — 15.0 tok/s single-stream sustained**,
-  quality battery clean, GSM8K 91%. The shipped config stacks three levers
-  (sessions 1-8, `spark/handoffs/02-*.md`): FULL cudagraphs over RoCE
-  (needs NCCL 2.30.7), expert-pruned planes (256→208/layer — shrinks planes
-  97→79 GB/rank so they fit page cache; decode goes fault-free), and MTP
-  speculative decode k=1 (+31% — a *loss* before pruning, a win once verify
-  reads come from cache). Routing stays at native top-k=8.
+- GLM-5.2, 2 Sparks (TP2): **working — ~20 tok/s single-stream (greedy,
+  deterministic)**, up from 15.0. The new lever (session 9-10): **NVFP4 the
+  attention + shared-expert linears** (weight-only FP4 via Marlin; GB10 has no
+  native FP4 MMA → 4-bit weight read, bf16 compute). Decode is bandwidth-bound
+  and — once experts were 2-bit — *attention* was ~60% of the per-token byte
+  read while still at FP8, so cutting it to 4-bit bought ~1.33×. Progression:
+  FP8-attn 15.0 → NVFP4 big-3 (`o/q_b/kv_b`) ~18 → full attention+shared ~20.
+  See `spark/NVFP4-DENSE.md`. **Quality of the NVFP4 build not yet re-evaluated**
+  (rel-L1 ~0.09 on the quantized weights; eval pending). Real-world *sampled*
+  throughput varies ~13-20 (MTP acceptance depends on how well the draft
+  matches the sampled token; greedy shows the clean ~20).
+  The prior shipped config (**15.0 tok/s, quality battery clean, GSM8K 91%**)
+  stacks three levers (sessions 1-8, `spark/handoffs/02-*.md`): FULL cudagraphs
+  over RoCE (needs NCCL 2.30.7), expert-pruned planes (256→208/layer — shrinks
+  planes 97→79 GB/rank so they fit page cache; decode goes fault-free), and MTP
+  speculative decode k=1. Routing stays at native top-k=8. NVFP4-attn stacks on
+  top of all three.
 - GLM-5.2 PP2 fallback: ~5.5 tok/s single-stream, ~17 tok/s aggregate at
   8 streams. Simpler, no NCCL version pin; keep it in your pocket if TP2
   misbehaves.
