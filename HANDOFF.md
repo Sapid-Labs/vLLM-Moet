@@ -9,22 +9,24 @@ lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
 **REAP (saliency expert-prune) shipped + coherence-validated for GLM-5.2.** Also
 uncovered two serving-quality problems in the shipped speed stack (below).
 
-- **Server UP now:** **FP8 baseline + REAP planes + no-MTP** (`MODEL=$M`,
-  `moe_w2_planes_tp2_p208_reap`, `--no-mtp`), TP2, healthy on :8000. Verified
-  coherent AND correct on chat: count-to-10, Fibonacci, the "all but 9 sheep"
-  riddle (→9), GSM Natalia (→72), Rayleigh sky. **REAP does not break the model.**
-- **⚠️ NVFP4 build is degraded on sustained generation.** The shipped ~20 tok/s
-  `nvfp4_dense_overlay` produces a few coherent tokens then collapses into token
-  repetition ("...6e6f6f6f", "</think>" loops) at greedy — on BOTH the frequency
-  and REAP planes, so it's the NVFP4 quant (rel-L1 ~0.09), not the prune. Its
-  "quality NOT yet evaluated" caveat now has evidence: **it's broken for long
-  outputs.** Short completions still look fine (why session-10's quick check
-  passed). Needs real fix/eval before any quality claim.
-- **⚠️ MTP speculative decoding emits garbage drafts** in the current serving:
-  raw greedy gives "Paris1 and1 the1 the1..." (target/bad-draft interleave with
-  `num_speculative_tokens=1`). Disabling MTP removes the "1" interleave. Whether
-  this is a fresh regression or was always there under greedy is open; the shipped
-  20 tok/s depends on MTP so this must be root-caused.
+- **Server UP now:** **big-3 NVFP4 + REAP planes + MTP** (`MODEL=$M/nvfp4_big3_overlay`,
+  `VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj`, `moe_w2_planes_tp2_p208_reap`,
+  MTP on), TP2, healthy on :8000. Verified **fully coherent + correct** on chat:
+  320-tok transformer explanation clean at greedy, "all but 9 sheep" →9, GSM
+  Natalia. **REAP does not break the model, on the config you actually ship.**
+- **✅ RESOLVED — the "NVFP4 incoherent" scare was the FULL cut, not big-3.**
+  The **full** `nvfp4_dense_overlay` cut (all 10 targets incl. dense MLP
+  `gate/up/down_proj`) degrades on sustained generation — coherent for a while
+  then token-repetition / "</think>" loops (greedy fast, sampled ~250 tok then
+  collapses). Reproduces on frequency AND REAP planes, nodes byte-identical
+  (not a desync) → it's the aggressive quant (rel-L1 ~0.09), not the prune, not
+  MTP. The **big-3 cut** (`o_proj,q_b_proj,kv_b_proj`, ~18 tok/s, the config
+  actually demoed) is fully coherent. **Do not ship the full cut** without a
+  real quant fix + eval; big-3 is the safe NVFP4 config. FP8 (no NVFP4) is also
+  clean.
+- **MTP note:** the "Paris1 and1..." garbage-draft interleave appeared only on
+  the FULL-cut degraded target; on big-3 MTP is clean. So MTP is fine — its
+  earlier garbage was downstream of the full-cut target collapse, not an MTP bug.
 - **Code pushed:** `Sapid-Labs/vLLM-Moet` `spark-gb10`. REAP tooling:
   `~/Dev/reap` `add-glm_moe_dsa-support` (commits `02b838a`,`7f9f567`,`fd2b7f4`).
 - **NEXT:** (a) REAP-vs-frequency quality A/B on the clean FP8 stack (GSM8K-50) —
