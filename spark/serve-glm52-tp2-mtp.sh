@@ -56,7 +56,15 @@ ARGS=(
 if [[ "${1:-}" == "--no-mtp" ]]; then
   shift
 else
-  ARGS+=(--speculative-config "{\"method\": \"mtp\", \"num_speculative_tokens\": $MTP_K}")
+  # DRAFT_TP: run the MTP draft at a different tensor-parallel size than the
+  # target (must be 1 or the target TP). DRAFT_TP=1 makes the draft forward
+  # TP-free (no per-draft all-reduce) — attacks the fixed per-draft overhead.
+  spec="{\"method\": \"mtp\", \"num_speculative_tokens\": $MTP_K"
+  if [[ -n "${DRAFT_TP:-}" ]]; then
+    spec="$spec, \"draft_tensor_parallel_size\": $DRAFT_TP"
+  fi
+  spec="$spec}"
+  ARGS+=(--speculative-config "$spec")
 fi
 
 if [[ "${1:-}" == "--eager" ]]; then

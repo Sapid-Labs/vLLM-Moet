@@ -45,11 +45,20 @@ uncovered two serving-quality problems in the shipped speed stack (below).
     Not worth training a 9.7B MoE layer for. (MTP already gives ~1.62× over the
     ~11.4 non-MTP floor; the ~12% gap to the 1.84× ceiling is MTP-forward overhead,
     a serving/kernel cost, not a drafter-accuracy cost.)
-  - **Recommendation: do NOT build the drafter trainer** — ROI too low. If chasing
-    MTP throughput, the lever is making the MTP *forward cheaper/lower-overhead*
-    (fewer draft-layer experts / TP-free drafter / fused launch), not retraining.
-    Bigger throughput levers live elsewhere (NVFP4 breadth capped at big-3; the
-    non-MTP floor).
+  - **Recommendation: do NOT build the drafter trainer** — ROI too low.
+  - **TP-free draft TESTED — negative result.** `draft_tensor_parallel_size=1`
+    (added `DRAFT_TP` env knob to `serve-glm52-tp2-mtp.sh`; it's a supported vLLM
+    config, no surgery) boots + is coherent + same 84.6% acceptance, but runs
+    **~17.6 tok/s (~5% SLOWER** than TP2-draft's 18.5). So the ~12 ms/draft
+    overhead is NOT the TP all-reduce — splitting the draft across both GPUs
+    (TP2) beats running it on one + syncing. The overhead is launch/orchestration
+    (Python spec-decode loop, sample/accept/reject, KV bookkeeping), which neither
+    TP-free nor expert-count touches (MoE reads top-k regardless of pool). **The
+    cheap "cheaper-forward" levers are exhausted.** Reducing MTP overhead further
+    = deep vLLM spec-decode work (cudagraph the whole draft+verify loop), low ROI.
+  - **Net: MTP at K=1 (18.5 tok/s, 84% accept) is near-optimal for this setup.**
+    Bigger throughput levers live elsewhere (NVFP4 breadth capped at big-3 by
+    quality; the non-MTP floor). Shipped/best MTP config = plain K=1 (no DRAFT_TP).
 - **Code pushed:** `Sapid-Labs/vLLM-Moet` `spark-gb10`. REAP tooling:
   `~/Dev/reap` `add-glm_moe_dsa-support` (commits `02b838a`,`7f9f567`,`fd2b7f4`).
 - **NEXT:** (a) REAP-vs-frequency quality A/B on the clean FP8 stack (GSM8K-50) —
