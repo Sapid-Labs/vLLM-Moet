@@ -99,8 +99,21 @@ steps first, fit the drafter last against the frozen model.
      MoE/attn intermediates over 8192 tokens). `bs4 seq1024` peaks ~55 GB — safe.
      If you push tokens, add batches (num_batches only affects time, not peak),
      don't raise batch_size/seq.
-   - After both shards finish: scp peer's `reap.shard1.raw.pt` here, then
-     merge → reap_keep_list.py → prune_planes.py (cmds above).
+   - **DONE (session 11):** DP calibration completed both nodes (8 batches each,
+     16 total). Merged → `spark/routing/keep208_reap.json` (top-208/layer;
+     ~37 experts/layer differ from the frequency prune; merged coverage mean
+     252/256 active). `prune_planes.py` ran on BOTH nodes →
+     `moe_w2_planes_tp2_p208_reap` (79 GB, 75×208, present on .1 and .2).
+     Observer artifacts: `~/Dev/reap/artifacts/GLM-5.2-FP8/evol-codealpaca-v1/
+     layerwise/reap.{merged,shard0.raw,shard1.raw}.pt`.
+   - **PEER checkout was stale** (missing `spark/routing/`) — copied
+     `prune_planes.py`+`keep208_reap.json` there manually. If re-running on the
+     peer, verify `~/Dev/vLLM-Moet/spark/routing/` exists first.
+   - **SERVING the REAP build:** same NVFP4 serve cmd but
+     `VLLM_MOE_W2_PREPACKED_DIR=$M/moe_w2_planes_tp2_p208_reap`. Ray must be up
+     first (`bash spark/start-ray-cluster.sh`; the serve driver forwards the
+     VLLM_MOE_W2_* env to workers — not baked in raylet). Sanity-check: greedy
+     coherence on ~5-10 prompts, then GSM8K-50.
 2. **Drafter (second, last model change)** — fine-tune the MTP head (layer 78)
    against the frozen NVFP4+REAP target to raise MTP acceptance (the real lever
    for effective throughput; sampled tok/s currently varies ~13-20 with
