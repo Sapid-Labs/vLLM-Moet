@@ -48,11 +48,49 @@ steps first, fit the drafter last against the frozen model.
      <5%); hy3 tests still green. Env: run reap with **`~/venvs/hf/bin/python`
      `PYTHONPATH=src`** (reap not pip-installed; that venv has pytest+transformers
      w/ GlmMoeDsa).
-   - **NEXT CONCRETE STEP:** run the observer on `~/models/hf/GLM-5.2-FP8` via
-     `python -m reap.layerwise_prune --disk_stream ... --run_observer_only true`
-     (needs the GPUs → **take down the live NVFP4 server first**; mind the Ray
-     GPU-release footgun). Then saliency→keep-list→prune_planes. Sanity-check
-     after: ~10-20 prompts coherence or GSM8K-50.
+   - **VALIDATED ON REAL MODEL (session 11):** the streaming observer runs
+     end-to-end on GLM-5.2-FP8 (all 78 blocks: data→FP8 dequant→DSA forward→
+     saliency). Server was torn down (both nodes, GPUs freed 0.0/2.0). Reap deps
+     (`accelerate datasets scikit-learn matplotlib seaborn`) installed into the
+     **CUDA `vllm-moet` venv** on BOTH nodes (the `hf` venv is CPU-only torch —
+     do NOT use it for the real run). Peer synced: reap `src/scripts/tests`
+     rsync'd to `spark-c84b:~/Dev/reap` + deps installed + imports verified.
+     Extra reap fixes this session (commits `02b838a`, `7f9f567`, `fd2b7f4`):
+     FP8 dequant+glm_converter; DP `data_shard_index/count`+`save_raw_state`;
+     **DSA cross-layer top-k threading** (GLM "shared" attn layers crash the
+     isolated block-replay without it). Disk-bound: each MoE block re-reads
+     ~19 GB (dequant), so a full pass is multi-hour; DP halves the compute part.
+   - **RUN THE OBSERVER (both nodes, DP; from `~/Dev/reap`, env
+     `CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src`, python `~/venvs/vllm-moet/bin/python`):**
+     ```
+     python -m reap.layerwise_prune \
+       --model_name ~/models/hf/GLM-5.2-FP8 \
+       --dataset_name theblackcat102/evol-codealpaca-v1 \
+       --run_observer_only true --disk_stream true \
+       --batches_per_category <N> --batch_size <B> --model_max_length 2048 \
+       --seed 42 --output_file_name reap.pt \
+       --data_shard_count 2 --data_shard_index <0 on .1 / 1 on .2>
+     ```
+     Output: `artifacts/GLM-5.2-FP8/evol-codealpaca-v1/layerwise/reap.shard<i>.raw.pt`
+     (RAW state, trackers intact — needed for the merge).
+   - **MERGE → KEEP-LIST → PRUNE PLANES:**
+     ```
+     python scripts/merge_observer_states.py \
+       reap.shard0.raw.pt <copied-from-peer>reap.shard1.raw.pt --out reap.merged.pt
+     python ~/Dev/vLLM-Moet/spark/routing/reap_keep_list.py \
+       reap.merged.pt ~/Dev/vLLM-Moet/spark/routing/keep208_reap.json \
+       --keep 208 --compare ~/Dev/vLLM-Moet/spark/routing/keep208.json
+     # on BOTH nodes (rank-agnostic row-select, ~15 min):
+     python ~/Dev/vLLM-Moet/spark/routing/prune_planes.py \
+       ~/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2 \
+       ~/models/hf/GLM-5.2-FP8/moe_w2_planes_tp2_p208_reap \
+       ~/Dev/vLLM-Moet/spark/routing/keep208_reap.json
+     ```
+     Then serve with `VLLM_MOE_W2_PREPACKED_DIR=...moe_w2_planes_tp2_p208_reap`
+     (else identical to the shipped serve cmd). Sanity-check: ~10-20 prompts
+     coherence or GSM8K-50.
+   - **OPEN DECISION:** calibration size `<N>×<B>` (bigger = better saliency,
+     linearly longer). Leaning N≈32-64 per node, B≈4, seq 2048.
 2. **Drafter (second, last model change)** — fine-tune the MTP head (layer 78)
    against the frozen NVFP4+REAP target to raise MTP acceptance (the real lever
    for effective throughput; sampled tok/s currently varies ~13-20 with
