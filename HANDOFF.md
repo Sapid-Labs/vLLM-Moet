@@ -89,8 +89,18 @@ steps first, fit the drafter last against the frozen model.
      Then serve with `VLLM_MOE_W2_PREPACKED_DIR=...moe_w2_planes_tp2_p208_reap`
      (else identical to the shipped serve cmd). Sanity-check: ~10-20 prompts
      coherence or GSM8K-50.
-   - **OPEN DECISION:** calibration size `<N>×<B>` (bigger = better saliency,
-     linearly longer). Leaning N≈32-64 per node, B≈4, seq 2048.
+   - **RUN IN PROGRESS (session 11):** DP calibration launched both nodes with
+     `batches_per_category 16 --batch_size 4 --model_max_length 1024 --seed 42`
+     (→ 8 batches/node, ~65k tokens total), `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
+     ~2.2s/it, ~28s/MoE block → ~40-50 min/node. Writes `reap.shard0.raw.pt`
+     (this node) / `reap.shard1.raw.pt` (peer).
+   - **OOM GOTCHA:** `batch_size 8 --model_max_length 1024` OOMs the GB10 (~119 GB
+     peak on the first MoE block: 256 experts dequant'd to bf16 ~19 GB + per-token
+     MoE/attn intermediates over 8192 tokens). `bs4 seq1024` peaks ~55 GB — safe.
+     If you push tokens, add batches (num_batches only affects time, not peak),
+     don't raise batch_size/seq.
+   - After both shards finish: scp peer's `reap.shard1.raw.pt` here, then
+     merge → reap_keep_list.py → prune_planes.py (cmds above).
 2. **Drafter (second, last model change)** — fine-tune the MTP head (layer 78)
    against the frozen NVFP4+REAP target to raise MTP acceptance (the real lever
    for effective throughput; sampled tok/s currently varies ~13-20 with
