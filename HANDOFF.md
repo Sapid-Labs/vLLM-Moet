@@ -2,7 +2,9 @@
 
 Short "resume here" pointer. Deep docs: `spark/NVFP4-DENSE.md` (the shipped
 lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
-(serve/measure), `spark/handoffs/02-*.md` (how we got to 15).
+(serve/measure), `spark/handoffs/02-*.md` (how we got to 15),
+**`spark/MTP-DRAFT-COST.md` (the hard vLLM problem → 30 tok/s: make the MTP draft
+forward cheap; the drafter is PIECEWISE-cudagraphed while the verify is FULL).**
 
 ## STATUS (2026-07-14, session 11)
 
