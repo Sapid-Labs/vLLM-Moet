@@ -4,21 +4,36 @@ Short "resume here" pointer. Deep docs: `spark/NVFP4-DENSE.md` (the shipped
 lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
 (serve/measure), `spark/handoffs/02-*.md` (how we got to 15).
 
-## STATUS (2026-07-14, session 10)
+## STATUS (2026-07-14, session 11)
 
-**GLM-5.2 on 2× Spark now serves ~20 tok/s single-stream (greedy)** — up from
-15 — via **NVFP4 weight-only on the attention + shared-expert linears** (stacks
-on top of the shipped 2-bit pruned experts + MTP). Decode is bandwidth-bound;
-after 2-bit experts, attention was ~60% of per-token bytes at FP8, so 4-bit-ing
-it bought ~1.33×. Progression: FP8-attn 15 → NVFP4 big-3 ~18 → full attn+shared
-~20. **Quality of the NVFP4 build NOT yet evaluated** (weights rel-L1 ~0.09).
+**REAP (saliency expert-prune) shipped + coherence-validated for GLM-5.2.** Also
+uncovered two serving-quality problems in the shipped speed stack (below).
 
-- **Server is UP right now** on the full NVFP4 build (`nvfp4_dense_overlay`),
-  TP2, healthy on :8000.
-- **Code pushed:** `Sapid-Labs/vLLM-Moet` branch `spark-gb10` (commit 78345be).
-- **Model pushed:** `sapidlabs/GLM-5.2-NVFP4-attn-experimental` (public,
-  experimental, 8.4 GB NVFP4 attention delta + honest card; upload may still be
-  finishing on nohup — check `~/nvfp4-hf-upload.log`).
+- **Server UP now:** **FP8 baseline + REAP planes + no-MTP** (`MODEL=$M`,
+  `moe_w2_planes_tp2_p208_reap`, `--no-mtp`), TP2, healthy on :8000. Verified
+  coherent AND correct on chat: count-to-10, Fibonacci, the "all but 9 sheep"
+  riddle (→9), GSM Natalia (→72), Rayleigh sky. **REAP does not break the model.**
+- **⚠️ NVFP4 build is degraded on sustained generation.** The shipped ~20 tok/s
+  `nvfp4_dense_overlay` produces a few coherent tokens then collapses into token
+  repetition ("...6e6f6f6f", "</think>" loops) at greedy — on BOTH the frequency
+  and REAP planes, so it's the NVFP4 quant (rel-L1 ~0.09), not the prune. Its
+  "quality NOT yet evaluated" caveat now has evidence: **it's broken for long
+  outputs.** Short completions still look fine (why session-10's quick check
+  passed). Needs real fix/eval before any quality claim.
+- **⚠️ MTP speculative decoding emits garbage drafts** in the current serving:
+  raw greedy gives "Paris1 and1 the1 the1..." (target/bad-draft interleave with
+  `num_speculative_tokens=1`). Disabling MTP removes the "1" interleave. Whether
+  this is a fresh regression or was always there under greedy is open; the shipped
+  20 tok/s depends on MTP so this must be root-caused.
+- **Code pushed:** `Sapid-Labs/vLLM-Moet` `spark-gb10`. REAP tooling:
+  `~/Dev/reap` `add-glm_moe_dsa-support` (commits `02b838a`,`7f9f567`,`fd2b7f4`).
+- **NEXT:** (a) REAP-vs-frequency quality A/B on the clean FP8 stack (GSM8K-50) —
+  does REAP actually buy back quality; (b) root-cause NVFP4 collapse + MTP garbage
+  (both block the 20 tok/s config); then drafter → full battery.
+
+### (prev) STATUS session 10 — NVFP4 ~20 tok/s
+Full NVFP4 attn+shared reached ~20 tok/s greedy (throughput only; see the NVFP4
+quality caveat above). `sapidlabs/GLM-5.2-NVFP4-attn-experimental` pushed.
 
 ## NEXT (agreed plan — order matters)
 
