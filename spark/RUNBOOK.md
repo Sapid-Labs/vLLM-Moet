@@ -10,8 +10,9 @@ CUDA 13, driver 580.159.03).
   ~21 tok/s single-stream (eager + MTP k=2; ≈ the 273 GB/s bandwidth ceiling)
 - GLM-5.2, 2 Sparks (TP2): **working — ~20 tok/s single-stream (greedy,
   deterministic)**, up from 15.0. The new lever (session 9-10): **NVFP4 the
-  attention + shared-expert linears** (weight-only FP4 via Marlin; GB10 has no
-  native FP4 MMA → 4-bit weight read, bf16 compute). Decode is bandwidth-bound
+  attention + shared-expert linears** (weight-only FP4 via Marlin; GB10 DOES have
+  FP4 tensor cores [corrected session 12] but Marlin W4A16 is faster for M=1 decode
+  than Cutlass W4A4 → 4-bit weight read, bf16 compute). Decode is bandwidth-bound
   and — once experts were 2-bit — *attention* was ~60% of the per-token byte
   read while still at FP8, so cutting it to 4-bit bought ~1.33×. Progression:
   FP8-attn 15.0 → NVFP4 big-3 (`o/q_b/kv_b`) ~18 → full attention+shared ~20.

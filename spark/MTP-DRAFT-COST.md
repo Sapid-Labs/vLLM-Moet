@@ -7,9 +7,82 @@ verify.** Written 2026-07-14 (session 11).
 
 ## STATUS
 
-Phase: **new problem, scoped + measured, not started.** Branch `spark-gb10`.
-Serving today = big-3 NVFP4 + REAP planes + MTP K=1 = **18.5 tok/s** (warmed,
-greedy). Goal = **30 tok/s** (usability bar). Need ~1.62×, and it will not come
+Phase: **Approach A (cheapen the draft forward) FULLY REFUTED — draft cost is a
+dead end. The 30-tok/s lever moved to the VERIFY side (per-position expert-read
+bandwidth).** Branch `spark-gb10`. Serving today = big-3 NVFP4 + REAP planes + MTP
+K=1 = **18.5 tok/s** (warmed, greedy). Baseline re-confirmed + restored session 12.
+
+### SESSION 12 (2026-07-14) — findings, don't re-derive
+
+- **Root cause pinned in code (better than session-11's guess):** the drafter is
+  **never wrapped in a cudagraph wrapper at all** — not just "denied FULL." With
+  `VLLM_USE_BREAKABLE_CUDAGRAPH` off (default), `gpu_model_runner.py:~5874` wraps
+  ONLY the main model in `CUDAGraphWrapper(FULL)`; the drafter runs its
+  torch-compiled **piecewise** graphs with host relaunch at every attn/MoE
+  boundary. The `initialize_cudagraph_keys` clamp (`llm_base_proposer.py:405`,
+  MTP path = `SpecDecodeBaseProposer`) is a second, separate cap.
+- **`VLLM_USE_BREAKABLE_CUDAGRAPH=1` (the cheap, no-code form of Approach A):
+  NEGATIVE — ruled out.** It boots on both nodes (env auto-carries to the peer
+  via Ray driver-env copy). But: (1) it **globally disables inductor**
+  ("disabling vLLM's torch.compile pipeline. Equivalent to -cc.mode=none") —
+  swaps fused kernels for eager-under-one-graph for BOTH main and draft. (2)
+  **Step time UNCHANGED:** K=1 breakable = **13.0 tok/s**, accept **31.6%**,
+  tokens/step 1.32 → step ≈ **101 ms** vs baseline 18.5 tok/s / 84.6% / 1.85 /
+  **100 ms**. So removing the draft's piecewise host-gaps via single-graph
+  capture bought **~0 ms of step time** (the eager-op penalty offset it, OR the
+  gaps weren't the cost). (3) **NVFP4 ⊥ inductor-off:** acceptance collapsed
+  84.6→31.6% and output went off-topic — the NVFP4 path depends on the inductor
+  fusions (norm_quant/act_quant/nvfp4 dequant) for correct numerics. **Never run
+  breakable on the NVFP4 stack.**
+- **Torch profiler is too self-distorting to isolate the 33 ms here.** Enabled it
+  via `--profiler-config '{"profiler":"torch","torch_profiler_dir":...}'` (NOT the
+  old `VLLM_TORCH_PROFILER_DIR` env — gone in v0.24; routes gate on
+  `ProfilerConfig`). Trace shows compute-stream **duty ~32%, ~2 s idle in ~146
+  large (>100 µs) host gaps** — heavily host-bound — BUT profiling itself drops
+  serving to ~10 tok/s, inflating exactly those gaps, so the draft-vs-verify
+  sub-split isn't trustworthy from it. The `execute_context_0(0)_generation_1(2)`
+  / `execute_context_1(20)_generation_0(0)` annotations are nested/overlapping;
+  don't try to draft/verify-classify by them.
+- **★ Approach A (surgical FULL-cudagraph draft) BUILT, CONFIRMED ENGAGED, and
+  REFUTED. This is the headline result — Approach A is DEAD; do not revisit.**
+  Env-gated patch `VLLM_DRAFT_FULL_CUDAGRAPH=1`, 3 edits (all reverted after,
+  backups in scratchpad; diff below to reproduce):
+  1. `gpu_model_runner.py:~5878` (non-breakable FULL branch) — also wrap
+     `drafter.model` in `CUDAGraphWrapper(FULL)`.
+  2. `gpu_model_runner.py:~2539` — skip the `spec_decode_common_attn_metadata
+     .unpadded(...)` call (keep PADDED metadata) so the draft has static shapes
+     for FULL capture. (The unpad is why vLLM's comment says the drafter "only
+     uses piecewise cudagraphs".)
+  3. `llm_base_proposer.py:405` — clamp → `CUDAGraphMode.FULL`.
+  - **It did NOT crash** — the draft's MLA decode attention IS full-cudagraph-safe
+    (same kernel the verify FULL-captures). Boots, coherent, LOSSLESS (accept
+    85.7% = baseline). Draft graph captures lazily on 1st decode. Both patch
+    halves logged as engaged on the worker (had to add a debug log to prove it —
+    the flag reaches workers via Ray runtime_env, INVISIBLE in `/proc/PID/environ`
+    which is an exec-time snapshot; don't check propagation that way).
+  - **RESULT — zero speedup at either depth:**
+    | config | K=1 | K=2 |
+    |---|---|---|
+    | baseline (piecewise draft) | 18.5 | 19.0 |
+    | FULL-draft (confirmed on)  | 18.5 | 18.6 |
+  - **Why (the reframing that kills A/C/D and probably E):** the ~32 ms marginal
+    per-depth cost (Δstep K1→K2) is UNCHANGED whether the draft forward is
+    piecewise or one FULL graph → **the draft forward was never the cost.** Each
+    extra spec position makes the VERIFY process one more position, and the verify
+    is **bandwidth-bound on per-position expert-weight reads** (MoE reads top-k
+    *per token*; K+1 positions ≈ (K+1)× expert reads). THAT extra read pass is the
+    ~32 ms. No draft-side change (cheaper forward, FULL graph, TP-free, fewer
+    experts — Approaches A/C/D) can touch it. **Approach E (n-gram, T_draft≈0)
+    likely also fails**: it still adds verify positions, so it pays the same
+    per-position expert-read tax. Only its cost is on the DRAFT side (0), but the
+    depth tax is on the VERIFY side — untouched.
+  - **⇒ The 30-tok/s lever is NOT speculative decoding at all — it's cutting the
+    verify's per-position expert-read bandwidth** (lower MoE top-k, or a
+    faster/narrower expert read, or the NVFP4 verify-side track). See the PARALLEL
+    TRACK section — it is now the MAIN track, not a side one.
+
+### (session 11) original framing
+Goal = **30 tok/s** (usability bar). Need ~1.62×, and it will not come
 from the drafter's *accuracy* or from adding K — only from making the draft
 *forward* cheap enough that depth pays.
 
@@ -37,7 +110,15 @@ the running average (18.5) → **K=2 is a wash (measured 1.03×), K=3 negative.*
 The whole game is **T_draft**. Everything else (accuracy fine-tune, K, tree
 verify) is downstream of it and pointless until it's cheap.
 
-## WHY T_draft is 33 ms (root cause — the hard part)
+> **⚠ SESSION-12 CORRECTION — this whole model is WRONG.** The "make T_draft cheap
+> and depth pays" thesis was falsified: FULL-cudagraphing the draft forward (the
+> exact fix below) changed the K1→K2 marginal by ~0. The ~32 ms/depth is the extra
+> VERIFY position's per-token expert-read bandwidth, not the draft forward. So
+> `c = T_draft/T_verify` is NOT the right quantity — the draft forward is ~free;
+> the depth tax lives on the verify side. See the session-12 STATUS block up top.
+> Read the section below only as the (refuted) original hypothesis.
+
+## WHY T_draft is 33 ms (root cause — the hard part) — ⚠ REFUTED, see correction above
 
 The draft is **one layer** (layer 78: MLA attn + 256-expert MoE + shared_head).
 Its compute share of the 67 ms verify is ~0.9 ms. It costs **33 ms**. So ~32 ms
@@ -74,19 +155,32 @@ is **fixed per-invocation overhead**, and the specific culprits:
   "Capturing CUDA graphs (decode, FULL)" for the model; proposer forced PIECEWISE
   in code).
 
-## NEXT (immediate, in order)
+## NEXT (immediate, in order) — REWRITTEN session 12 after Approach A refuted
 
-1. **PROFILE the draft forward first — do not guess the 33 ms split.** Attach a
-   torch profiler / nsys to one warmed decode step and separate: host gaps
-   (piecewise relaunch) vs eager attention vs MoE vs all-reduce vs
-   sample/accept host code. Whatever dominates decides which of the approaches
-   below to pursue. (Hook: `VLLM_TORCH_PROFILER_DIR=...` then hit the server; or
-   the `spark/profile_decode.sh` scaffold.)
-2. **Attack the biggest slice.** Expected #1 = piecewise host overhead → pursue
-   **Approach A (FULL cudagraph for the proposer).**
-3. Re-measure T_draft with the same K=1/K=2 tok/s protocol; target T_draft <10 ms.
-4. Once T_draft is cheap: raise K (2→4), then (only then) multi-step-distill the
-   drafter for deeper positions. Re-measure to 30.
+The draft-cost problem as originally framed is **closed (negative).** The 30-tok/s
+target now depends entirely on the **verify's per-position expert-read cost**.
+New order:
+
+1. **Quantify the per-position verify tax directly.** Measure decode tok/s at MTP
+   K=1 vs K=0 (no spec, `--no-mtp`) AND non-MTP 1-token vs the verify's 2-token
+   step. Confirm each extra verify position ≈ one extra full expert-read pass
+   (bandwidth). This sets the ceiling for ANY speculative scheme (incl. n-gram).
+2. **Attack the verify's per-position MoE bandwidth (the ONLY real lever):**
+   - **Lower MoE top-k** on the verify (8→6→4) — directly cuts per-position expert
+     bytes; measure quality hit (this is a real accuracy knob, needs GSM8K-50).
+   - **Verify-side NVFP4 on the experts / a faster expert read** — the parallel
+     track, now the MAIN track. Every byte off the per-position read lifts both
+     base decode AND makes any spec depth cheaper.
+3. **Only if (2) makes a spec position cheap:** revisit depth (K) and/or n-gram.
+   Until then, more spec work is pointless — the depth tax is on the verify side.
+4. **Accept 18.5 as the spec-decode ceiling** for now and redirect effort to the
+   verify-bandwidth track + the pending REAP-vs-frequency quality A/B.
+
+**DEAD — do not re-attempt (all cheapen the draft forward, which is ~free):**
+Approach A (FULL-cudagraph draft — TESTED, 0 gain), C (fuse draft+verify), D
+(cheaper draft compute / lower draft top-k / TP-free — TESTED slower). Approach E
+(n-gram) is dead-by-inference (still pays the per-position verify tax) — verify #1
+before spending on it.
 
 ## APPROACHES (ranked by expected leverage)
 

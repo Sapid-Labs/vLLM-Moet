@@ -103,16 +103,25 @@ def _level_to_nibble() -> torch.Tensor:
 _NIBBLE = _level_to_nibble()
 
 
-def quantize_nvfp4_w4a16(W: torch.Tensor):
+def quantize_nvfp4_w4a16(W: torch.Tensor, wg_override=None):
     """W: fp32 [No, Ki] (Ki % GROUP == 0). Returns:
       weight       uint8  [No, Ki//2]
       weight_scale e4m3   [No, Ki//GROUP]
       weight_scale_2 fp32 scalar (amax / (E2M1_MAX*FP8_MAX))
+
+    wg_override: if given, use this global scale instead of W's own amax. Used to
+    pack the two halves of a MergedColumnParallelLinear (shared-expert gate/up)
+    against a SHARED weight_scale_2 -- the W4A16 loader collapses the per-shard
+    weight_scale_2 via .max(), so mismatched scales corrupt the smaller-scale
+    half (see modelopt.py process_weights_after_loading warning).
     """
     No, Ki = W.shape
     assert Ki % GROUP == 0, f"Ki={Ki} not divisible by {GROUP}"
-    amax = W.abs().max()
-    wg = (amax / (E2M1_MAX * FP8_MAX)).clamp(min=1e-12)          # global scale
+    if wg_override is not None:
+        wg = wg_override
+    else:
+        amax = W.abs().max()
+        wg = (amax / (E2M1_MAX * FP8_MAX)).clamp(min=1e-12)      # global scale
     Wg = W.view(No, Ki // GROUP, GROUP)
     gamax = Wg.abs().amax(dim=-1, keepdim=True)                  # [No,G,1]
     gscale = (gamax / E2M1_MAX / wg).to(torch.float8_e4m3fn)     # e4m3 group scale
@@ -122,7 +131,9 @@ def quantize_nvfp4_w4a16(W: torch.Tensor):
     nibble = _NIBBLE[idx].view(No, Ki)                           # e2m1 nibble codes
     weight = pack_fp4_to_uint8(nibble)
     weight_scale = gscale.view(No, Ki // GROUP)
-    weight_scale_2 = wg.to(torch.float32).reshape(())
+    # .clone() so a shared wg_override doesn't alias across gate/up (safetensors
+    # save_file rejects tensors that share storage).
+    weight_scale_2 = wg.to(torch.float32).reshape(()).clone()
     # error for --verify
     Wdq = (_LEVELS[idx] * deq).view(No, Ki)
     rel = ((Wdq - W).abs().mean() / W.abs().mean().clamp(min=1e-9)).item()
@@ -188,6 +199,51 @@ def main():
                                        framework="pt", device="cpu")
         return handles[shard].get_tensor(name)
 
+    # Shared global scale for MergedColumnParallelLinear pairs. The W4A16 loader
+    # keeps ONE weight_scale_2 per module (per-shard entries collapsed via .max(),
+    # see modelopt.py process_weights_after_loading), so the halves of a merged
+    # linear MUST be packed against a COMMON global scale -- otherwise the
+    # smaller-scale half has its per-group scales computed against its own wg but
+    # dequantized with the other's, i.e. a straight (wg_other/wg_own) error in the
+    # weights. Measured disparities on GLM-5.2: gate/up 1.07-1.69x (mild), but
+    # q_a/kv_a up to 15.9x -- catastrophic, and q_a feeds the whole query latent.
+    # This is the likely root cause of the FULL-cut degradation (big-3 is clean at
+    # the same rel-L1 0.09 precisely because none of big-3 is merged).
+    MERGE_GROUPS = (
+        # (module infix, checkpoint members fused into one merged linear)
+        (".mlp.shared_experts.", ("gate_proj.weight", "up_proj.weight")),      # -> gate_up_proj
+        (".self_attn.", ("q_a_proj.weight", "kv_a_proj_with_mqa.weight")),     # -> fused_qkv_a_proj
+    )
+
+    def merge_key(nm):
+        for infix, members in MERGE_GROUPS:
+            if infix in nm:
+                for m in members:
+                    if nm.endswith(m):
+                        return nm[:-len(m)], members
+        return None, None
+
+    targ_names = {n for n, _ in targets}
+    shared_wg = {}
+    for name, shard in targets:
+        k, members = merge_key(name)
+        if k is None or k in shared_wg:
+            continue
+        pair = [k + m for m in members]
+        # only share when BOTH halves are actually being packed
+        if not all(p in targ_names for p in pair):
+            continue
+        amax = 0.0
+        for p in pair:
+            psc = p[:-len(".weight")] + ".weight_scale_inv"
+            Wf = dequant_block_fp8(get(p, idx["weight_map"][p]),
+                                   get(psc, idx["weight_map"][psc]))
+            amax = max(amax, float(Wf.abs().max()))
+        shared_wg[k] = torch.tensor(amax / (E2M1_MAX * FP8_MAX)).clamp(min=1e-12)
+    if shared_wg:
+        print(f"# shared global scale for {len(shared_wg)} merged pairs "
+              f"(gate_up / fused_qkv_a)")
+
     errs = []
     new_tensors = {}   # name -> tensor (for output shards)
     orig_bytes = 0
@@ -197,7 +253,8 @@ def main():
         sname = name[:-len(".weight")] + ".weight_scale_inv"
         sc = get(sname, idx["weight_map"][sname])
         Wf = dequant_block_fp8(w, sc)
-        weight, wscale, wscale2, rel = quantize_nvfp4_w4a16(Wf)
+        wg_ov = shared_wg.get(merge_key(name)[0])
+        weight, wscale, wscale2, rel = quantize_nvfp4_w4a16(Wf, wg_override=wg_ov)
         errs.append((name, rel))
         orig_bytes += w.numel() + sc.numel() * 4
         new_bytes += weight.numel() + wscale.numel() + 4

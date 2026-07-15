@@ -99,8 +99,12 @@ VLLM_ENGINE_READY_TIMEOUT_S=2400 bash spark/serve-glm52-tp2-mtp.sh
    driver-forward (setdefault) — no raylet baking needed; but the hook only
    fires once the fp8.py placement (#1) is correct.
 
-**Gotchas learned:** GB10 has NO native FP4 MMA → weight-only Marlin FP4 (perfect
-for memory-bound decode: 4-bit read, bf16 compute). Overlay approach works but
+**Gotchas learned:** ~~GB10 has NO native FP4 MMA~~ **[CORRECTED session 12: GB10
+DOES have FP4 tensor cores — `cutlass_fp4_supported()`=True on sm_121.]** We use
+weight-only Marlin FP4 anyway because it's **faster for M=1 decode** (measured:
+Marlin 1.4–3.7× faster than Cutlass W4A4 at M=1; Cutlass's per-call activation
+fp4-quant overhead dominates at M=1 and only pays off batched, M≳64). Perfect
+for memory-bound decode: 4-bit read, bf16 compute. Overlay approach works but
 relies on the glob-duplicate skip guards (#3/#4) — a cleaner future design is
 moe_w2-style: load fp8 then swap from a prepacked dir. Ray cluster corrupts
 across many failed boots (ActorHandle-across-sessions) → restart with
