@@ -33,12 +33,33 @@ change needed; `VLLM_MOE_W2_FADVISE_GLOB` only matters at load time.
 - **Session-12's 21.8 did NOT reproduce** on freq-p208 planes (MTP acceptance
   77.2% here vs 84.6% on p208_reap) — plane choice moves acceptance more than
   drafter choice. If chasing the last tok/s, re-run the 3-way on p208_reap.
-- Server LEFT UP: dspark K=2 fast build on :8000 (`~/serve-dspark-k2.log`).
+### Session 14b — acceptance ablation: the drafter was NEVER degraded; new best = dspark K=2 + REAP ≈ 21.8
+
+Walked back every target mod to "recover" dspark acceptance (68% vs session-13's
+83-100% on FP8). ALL NEGATIVE — pos-0 acceptance across fast build / REAP swap /
+native top-k8 / no-NVFP4 / full-unpruned-planes = 68/69/70/68/67%. Each lever
+costs ≤1pt. **Session-13's 83-100% was eager + short trivia prompts; ~68% pos-0
+is this speculator's TRUE acceptance on 300-tok reasoning content.** Details +
+full tables: `spark/handoffs/03-dspark-acceptance-ablation.md`.
+
+- **REAP planes DID help both drafters' throughput (+0.5-1, plane I/O quality)
+  and MTP's acceptance (77.2→79.2%) but not dspark's** (hidden-state-conditioned
+  MTP head tracks target quality; the external draft is indifferent).
+- **BEST MEASURED CONFIG (left serving on :8000, `~/serve-dspark-best.log`):
+  dspark K=2 + p208_reap + NVFP4 big-3 + top-k4 ≈ 21.8 tok/s** (MTP K=1 same
+  stack ~21 — still within noise; no-draft floor 15.6; top-k8 ~18; unpruned
+  planes thrash at 2.3, don't fit page cache).
+- Session-12's 84.6% MTP acceptance / 21.8 also didn't reproduce exactly
+  (79.2% / ~21 today, same prompt-set caveat) — treat cross-session acceptance
+  numbers as content-bound, only compare within one prompt set.
 - Gotcha: one boot died `CUBLAS_STATUS_INTERNAL_ERROR` during PIECEWISE capture
   + Ray ActorHandle corruption → clean `spark/start-ray-cluster.sh` fixed it.
-- Results log: `~/Dev/howtospark/models/glm-5.2.md` (2026-07-16 session-14 entry).
-- NEXT (optional): 3-way on p208_reap planes; harness-benchmark the winner for
-  the site (informal 300-tok numbers are not `bench/harness.py` rows).
+- Results log: `~/Dev/howtospark/models/glm-5.2.md` (session-14a/b entries).
+- NEXT (optional, in value order): (1) draft self-distill against the served
+  target on representative content — the ONLY remaining acceptance lever
+  (~+2-4 tok/s at K=2-3 if pos rates hit ~80/60); (2) harness-benchmark the
+  best config for the site (informal 300-tok numbers ≠ `bench/harness.py` rows);
+  (3) GSM8K-50 sanity on dspark K=2 + REAP before calling it the ship config.
 
 ## STATUS (2026-07-16, session 13) — DSpark EXTERNAL speculator ported + working; fast-build PERF blocked (diagnosed) — **DIAGNOSIS REVISED IN SESSION 14 ABOVE**
 
