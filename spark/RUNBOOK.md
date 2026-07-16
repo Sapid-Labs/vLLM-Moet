@@ -144,7 +144,7 @@ First start JIT-compiles flashinfer kernels (minutes); later starts take
 ~3 min (plane read + dense stream). Expect ~105/121 GiB used and ~21 tok/s
 single-stream. An OpenAI-compatible API serves on `:8000`.
 
-## 4. Two Sparks: GLM-5.2 (753B, tensor-parallel — the 15 tok/s config)
+## 4. Two Sparks: GLM-5.2 (753B, tensor-parallel) — 15 tok/s base config, 21-22 with §4b
 
 One extra prerequisite: **NCCL ≥ 2.30.7** staged at `~/nccl-2.30.7/libnccl.so.2`
 on both nodes (extract from the `nvidia-nccl-cu13` wheel). Torch's bundled
@@ -169,6 +169,41 @@ tier warms by inference, not by `warm-planes.sh`). During decode,
 sanity: measure with `usage.completion_tokens` differentials (512 vs 1024),
 never by counting stream chunks — MTP bundles tokens per chunk. Or just run
 `spark/demo.py`, which does it right.
+
+### 4b. Fast build (~21-22 tok/s): NVFP4 big-3 + REAP planes + top-k4 + dspark K=2
+
+Best measured single-stream config (2026-07-16, session 14 — full 3-way and
+acceptance ablation in `spark/handoffs/03-dspark-acceptance-ablation.md`):
+dspark K=2 ≈ 21.8 tok/s; native MTP K=1 on the same stack ≈ 21 (tie); no-draft
+floor 15.6. Needs the dspark venv port applied on BOTH nodes
+(`dspark-port/apply.sh`) and the speculator at `~/models/hf/GLM-5.2-speculator.dspark`
+on both nodes.
+
+```bash
+# on the head node (.1):
+~/Dev/vLLM-Moet/spark/start-ray-cluster.sh
+M=$HOME/models/hf/GLM-5.2-FP8
+DSPARK_K=2 MODEL=$M/nvfp4_big3_overlay \
+  VLLM_MOE_W2_PREPACKED_DIR=$M/moe_w2_planes_tp2_p208_reap \
+  VLLM_NVFP4_DENSE=1 VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj \
+  VLLM_ENGINE_READY_TIMEOUT_S=2400 VLLM_MOE_W2_FADVISE_GLOB= \
+  ~/Dev/vLLM-Moet/spark/serve-glm52-tp2-dspark.sh --hf-overrides '{"num_experts_per_tok":4}'
+```
+
+Native-MTP flavor: same env with `MTP_K=1 serve-glm52-tp2-mtp.sh`. First ~10
+runs after boot are SLOW (2→22 tok/s): the serve script purges page cache and
+the mmap'd planes fault back in — never benchmark cold (the session-13 "dspark
+regression" was exactly this). Interactive demo with live tok/s + acceptance:
+`python3 spark/demo_chat.py`.
+
+### 4c. DSpark draft self-distillation (in progress)
+
+Fine-tuning the dspark draft against the fast-build target to raise acceptance
+(68% pos-0 on long-form content; content-dependent, NOT caused by the target
+mods — every ablation came back ≤1pt). Pipeline (speculators library, offline
+hidden-state cache, trained on the worker): `spark/dspark-distill/PLAN.md`.
+Hidden-states extraction server: `spark/serve-glm52-tp2-hidden.sh` (requires
+the two venv patches in `spark/dspark-distill/patches/` on both nodes).
 
 ### PP2 fallback (simpler, slower)
 
