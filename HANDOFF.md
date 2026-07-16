@@ -7,6 +7,20 @@ lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
 forward cheap; the drafter is PIECEWISE-cudagraphed while the verify is FULL).**
 
 
+## STATUS (2026-07-16, session 15) — DSpark self-distill pipeline BUILT + root-caused; blocked on speculators version drift → resume in `spark/dspark-distill/HANDOFF.md`
+
+Goal: squeeze more dspark acceptance (68→~80% pos-0) via self-distillation for
+~+2-4 tok/s over the shipped 21.8. Full offline pipeline works (extract server +
+2 venv patches, 1988-sample cache on the worker, trainer runs). BLOCKED on one
+diagnosed issue: the trainer at speculators HEAD (0.7.0.dev102) is a drifted
+forward vs the checkpoint's era (0.5.0.dev38) → step-0 pretrained scores pos-0
+0.35 not 0.83. All other hypotheses ruled out (weights/targets/aux/mask/attn).
+**NEXT = pin the trainer to ~commit 21033a7 (pre-07-13 forward rewrites), pass
+the step-0 gate (pos-0 ≈0.83), then fine-tune + reasoning-data slice.** Full
+resume plan, commands, gotchas, gates: **`spark/dspark-distill/HANDOFF.md`**
+(+ `PLAN.md`, `FINDINGS.md`). Shipped baseline to beat: dspark K=2 + REAP +
+NVFP4 + top-k4 ≈ 21.8 (RUNBOOK §4b), currently serving on :8000.
+
 ## STATUS (2026-07-16, session 14) — DSpark 3-way DONE: TIES native MTP; "regression" was COLD PAGE CACHE (session-13 diagnosis revised)
 
 RESUME POINTER. The dspark perf question is **settled — no throughput win, no
