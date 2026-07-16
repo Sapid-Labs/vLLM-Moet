@@ -42,7 +42,10 @@ export NCCL_GRAPH_MIXING_SUPPORT="${NCCL_GRAPH_MIXING_SUPPORT:-1}"
 # 5 aux layers for the draft fc + layer 78 (= num_hidden_layers, the LAST
 # layer) whose hidden states the trainer needs to compute the tv/ce targets
 # via verifier_lm_head. Matches launch_vllm.py's include_last_layer behavior.
-SPEC_CONFIG='{"method": "extract_hidden_states", "num_speculative_tokens": 1, "draft_model_config": {"hf_config": {"eagle_aux_hidden_state_layer_ids": [8, 23, 39, 55, 70, 78]}}}'
+# HIDDEN_AUX_IDS overrides the aux id list (this fork collects the INPUT of
+# layer i, so id i = output of layer i-1; +1 the card's ids to get outputs).
+HIDDEN_AUX_IDS="${HIDDEN_AUX_IDS:-[8, 23, 39, 55, 70, 78]}"
+SPEC_CONFIG="{\"method\": \"extract_hidden_states\", \"num_speculative_tokens\": 1, \"draft_model_config\": {\"hf_config\": {\"eagle_aux_hidden_state_layer_ids\": $HIDDEN_AUX_IDS}}}"
 KVT_CONFIG="{\"kv_connector\": \"ExampleHiddenStatesConnector\", \"kv_role\": \"kv_producer\", \"kv_connector_extra_config\": {\"shared_storage_path\": \"$HIDDEN_STATES_PATH\"}}"
 
 ARGS=(
