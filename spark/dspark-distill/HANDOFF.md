@@ -4,6 +4,200 @@ Resume-here pointer for the dspark draft fine-tune. Deep docs alongside:
 `PLAN.md` (design + decisions), `FINDINGS.md` (full investigation + rule-outs).
 Convention: `~/CLAUDE.md` → "Session handoffs".
 
+## STATUS (2026-07-17, session 16g) — EFFORT CONCLUDED: epoch-3 near ceiling; dspark-distill wound down (Joe's call)
+
+Ran an empirical weak-content probe on epoch-3 (40 prompts, 10 categories, per-prompt
+/metrics acceptance). Result — pos-0 by category, weakest→strongest:
+creative_writing 0.675 · code_explain 0.713 · code_gen 0.718 · chat_open 0.720 ·
+summarize 0.721 · science_deriv 0.722 · structured 0.746 · factual 0.756 ·
+logic_reasoning 0.778 · math_derivation 0.909. Overall mean 0.746, spread 0.388.
+KEY: the weak content is HIGH-ENTROPY creative/open-ended PROSE, not reasoning/code
+(which sit 0.72-0.91, near ceiling). v2 trained on the STRONG end → explains its null.
+The weak end is (a) likely intrinsic entropy, not a trainable gap, and (b) low-value to
+accelerate. **Joe's decision: STOP — epoch-3 is the shipped draft; do not publish
+Sparkulator.** Probe data: `~/weak-content-probe.json`, script `scratchpad/probe_weak_content.py`.
+
+THROUGHPUT FOLLOW-UP (separate from the verdict): the GATE-3 serves measured ~10.4 tok/s
+single-stream vs the documented 21.8 — for BOTH v2 and epoch-3 equally. Ruled out:
+v2-specific (weights byte-near-identical), page cache (fadvise-DONTNEED evict of 300 GB
+hidden states did nothing), PLANES_MMAP (hardcoded on). Most likely THERMAL THROTTLE after
+many hours of sustained GB10 load (generate→extract→train→serve); should recover after
+cooldown. Re-verify with a fresh serve later; no clean pre-session baseline was captured.
+
+RECLAIMABLE DISK (worker, if not resuming): `~/dspark-hs-reasoning-in` (~85 GB),
+`~/dspark-distill-data/prepared-combined/hidden_states` (symlinks), `~/dspark-hs-staging`,
+`~/dspark-hs-reasoning-out`, head `~/dspark-distill-data/openhermes-src` (1.9 GB). KEPT:
+ckpt-v1, ckpt-v2, prepared-reasoning*, reasoning-completions.jsonl. Current serve: epoch-3
+dspark K=2 §4b on :8000 (baseline restored, matches session start).
+
+## STATUS (2026-07-17, session 16f) — GATE 3 VERDICT: v2 = NULL (no live-proposer gain); back-to-back A/B corrected the false win
+
+FINAL GATE-3 result, same-instance back-to-back on 12 held-out reasoning prompts
+(~2830 draft steps each, cumulative /metrics per_pos_total/num_drafts_total):
+| draft | pos-0 | pos-1 | tok/verify | decode tok/s |
+| v2      | 0.771 | 0.561 | 2.33  | 10.19 |
+| epoch-3 | 0.770 | 0.556 | 2.325 | 10.22 |
+**IDENTICAL → the reasoning fine-tune produced NO live-proposer acceptance gain.**
+The earlier "+9pt win" was an ARTIFACT of comparing v2 (0.771) to the DOCUMENTED 0.68
+baseline, which was measured on a DIFFERENT (harder) ablation prompt set — not
+apples-to-apples. Lesson: always A/B the two drafts back-to-back on the SAME prompts
+in the SAME session; never compare to a doc number from another content set.
+
+WHY NULL (diagnosis): (1) the held-out OpenHermes code/derivation/reasoning prompts
+already score 0.77 under epoch-3 — they were NOT the weak content; dspark's 0.68
+weakness lives in the specific ablation "300-tok derivation" distribution, which my
+OpenHermes slice did not match. Trained where there was no headroom → no gain.
+(2) trainer≠proposer: val moved to 0.813 in the TRAINER's metric space but the fork
+proposer didn't budge. Weights DID change (attn proj 1-4%, verified), so not a save bug.
+Absolute 10.2 tok/s (both) = environmental page-cache thrash (300 GB hidden states
+squatting), NOT v2-specific — affects both equally; not the deciding factor.
+
+**DO NOT publish Sparkulator — no gain to ship.** Paths if resuming: (a) get/reconstruct
+the ACTUAL ablation weak-content prompt set and train on THAT distribution; (b) higher
+LR / more epochs for a bigger weight delta (risk: degrade); (c) accept the fork
+proposer has a ceiling this offline-distill approach can't move and stop. Artifacts kept:
+ckpt-v2 at `~/dspark-distill-data/ckpt-v2/0` + `~/models/hf/GLM-5.2-speculator.v2` (both
+nodes); reasoning data `~/dspark-distill-data/prepared-combined` + hidden states.
+
+## STATUS (2026-07-17, session 16e) — GATE 3: v2 ACCEPTANCE WIN (77/56 vs 68/45); throughput anomaly under A/B check
+
+**v2 dspark K=2 live on 12 HELD-OUT reasoning prompts: pos-0 0.771, pos-1 0.561,
+tok/verify 2.33** (from /metrics per_pos_total/num_drafts). Epoch-3 baseline was
+0.68/0.45, 2.14. → **+9pt pos-0, +11pt pos-1, +0.19 tok/verify** — the reasoning
+slice WORKED, acceptance improved on the weak domain, on held-out prompts.
+CAVEAT — absolute decode measured **10.2 tok/s** (flat over 16+ warm runs, below the
+15.6 no-draft floor), i.e. ~2× slower than the 21.8 baseline. NOT v2-specific: v2 and
+epoch-3 speculator config.py + weight keys/shapes/dtypes are BYTE-IDENTICAL (only a
+cosmetic transformers_version string differs), so draft fwd cost is identical → the
+slowdown is ENVIRONMENTAL (suspect: ~300 GB of freshly-written hidden states squatting
+in page cache, evicting plane pages; RAM shows 88-93 GB buff/cache but planes may be
+thrashing). At equal step cost, v2's higher tok/verify makes it strictly ≥ epoch-3 in
+tok/s. Running back-to-back epoch-3 on the SAME instance (`~/serve-ep3-gate3.log`) to
+prove it + quantify the environmental factor. Measure script `scratchpad/gate3_measure.py`
+(note: its tok_per_verify field uses draft-TOKENS denom — WRONG; use /metrics
+per_pos_total/num_drafts_total for the real per-pos rate, as above).
+TODO after A/B: fix throughput (drop page cache / re-warm; may need sudo drop_caches),
+re-measure v2 warm for the true tok/s, then if win holds → publish Sparkulator.
+
+## STATUS (2026-07-17, session 16d) — ckpt-v2 DONE (val reasoning pos-0 0.813, +); GATE 3 serve RUNNING
+
+ckpt-v2 completed in ~2 h (faster than the 6 h estimate). **VAL on the reasoning-heavy
+split: position_1_acc 0.813, position_2 0.724, full_acc 0.612** — above the old magpie
+baseline 0.789, and reasoning batches climbed ~0.75→0.813 within the epoch. Positive
+leading indicator that the reasoning slice moved acceptance on the weak domain. ckpt at
+`~/dspark-distill-data/ckpt-v2/0` (reference layout, arch DSparkDraftModel), staged on
+BOTH nodes as `~/models/hf/GLM-5.2-speculator.v2`. GATE 3 serve UP: dspark K=2 §4b with
+`SPECULATOR=~/models/hf/GLM-5.2-speculator.v2` (`~/serve-v2-gate3.log`). Measuring decode
+tok/s + per-pos acceptance on 12 HELD-OUT reasoning prompts (rows 3200+, not trained)
+via `scratchpad/gate3_measure.py` (streaming, /metrics deltas). Baseline to beat: epoch-3
+dspark K=2 = 68/45% pos-0/1, ~21.8 tok/s. Plan: measure v2, then back-to-back swap
+SPECULATOR to epoch-3 (`GLM-5.2-speculator.dspark`) on identical prompts for a clean
+same-session A/B. If v2 wins significantly → publish "Sparkulator" (sapidlabs).
+
+## STATUS (2026-07-17, session 16c) — step-3 data pipeline DONE; ckpt-v2 fine-tune RUNNING (~6 h)
+
+Full reasoning-slice pipeline completed: 4800 on-policy completions → prepare_data
+(w/ the mask-bug fix) → 3200-sample subsample → 3197 hidden states extracted +
+drained to worker → combined dataset assembled (`~/dspark-distill-data/prepared-combined`,
+5200 rows = 2000 magpie + 3200 reasoning, 5185 hs symlinks, index-aligned, verified).
+**ckpt-v2 fine-tune RUNNING** on the worker (v05 venv confirmed): `--data-path
+prepared-combined --from-pretrained epoch-3 --lr 1e-5 --scheduler-type none --epochs 1`,
+save → `~/dspark-distill-data/ckpt-v2`, log `~/dspark-finetune-v2.log`. ~181 tok/s over
+4.08M tok → ~6 h. Early: magpie batches pos-0 ~0.84, reasoning batches lower (~0.50
+full_acc) = the ones we want to lift. VAL split is the tail 10% = reasoning-heavy, so
+`val/position_1_acc_epoch` is the KEY signal (v1's magpie-val was 0.785 flat). Waiter
+`bor0ujiqk` fires on completion. NEXT: GATE 2 coherence, then GATE 3 — deploy ckpt-v2/0
+(reference layout, no grafting), serve dspark K=2 §4b, warm ≥10, measure pos-0/1 accept
++ tok/s vs 21.8/68%. If significant gain → publish as "Sparkulator" (sapidlabs HF).
+
+## STATUS (2026-07-16, session 16b) — v1 DONE but NULL (as predicted); step 3 (reasoning slice) IN PROGRESS
+
+v1 fine-tune completed cleanly (~1.5 h, ckpt at `spark-c84b:~/dspark-distill-data/ckpt-v1/0`,
+saved in the EXACT reference layout: architectures `["DSparkDraftModel"]` + auto_map
++ config.py + 7.6 GB model.safetensors → **deployable as-is, no grafting needed**).
+But val pos-0 = **0.785 ≈ 0.789 baseline → no acceptance gain**, exactly as PLAN
+predicted for magpie/ultrachat-only content. Joe chose to skip a confirmatory GATE-3
+serve of v1 and go straight to step 3 (the real lever).
+
+**Step 3 = on-policy reasoning slice** (Joe's domain pick: technical explanation/
+derivation + code/code-explanation + general reasoning; NO math). Pipeline:
+1. DONE — prompts at `~/dspark-distill-data/reasoning-prompts.jsonl` (4800, 1600
+   each code/derivation/reasoning; extract script `scratchpad/build_reasoning_prompts.py`,
+   filters OpenHermes-2.5 `source` tags, excludes math). Pool was deep (77k-180k/domain).
+2. IN PROGRESS — generation via `scratchpad/gen_completions.py` (stdlib, ThreadPoolExecutor
+   c=16, temp0, max_tokens 300, resumable) → `~/dspark-distill-data/reasoning-completions.jsonl`.
+   Serve = throughput-tuned: `serve-glm52-tp2-dspark.sh --no-spec --max-num-seqs 16
+   --max-num-batched-tokens 2048 --kv-cache-memory-bytes 6G --hf-overrides topk4`
+   (`~/serve-gen-throughput.log`), env same as §4b (nvfp4_big3_overlay + p208_reap planes).
+   Instantaneous ~72 tok/s aggregate (MoE bandwidth-bound; batching sublinear) → ETA ~5 h
+   for full 4800. Nearly all completions hit the 300-tok length cap. Resumable + incremental
+   so can harvest a balanced subset early. **Tear down this serve before the extract stage.**
+   DONE: 4800/4800, 0 err, ~1.25M tok, balanced. Coherent (target's "planning" style).
+3. DONE — `prepare_data.py` → `~/dspark-distill-data/prepared-reasoning` (4800 rows).
+   **CRITICAL GOTCHA — assistant mask**: GLM-5.2's chat template has NO `{% generation %}`
+   marker, so `return_assistant_tokens_mask` returns ALL ZEROS, and the auto-detected
+   regex `<|assistant|>(...)<|user|>` needs a trailing `<|user|>` that SINGLE-turn convos
+   lack → **loss_mask 100% empty** (silent; training learns nothing). Fix = explicit
+   `--assistant-pattern '<\|assistant\|>(.*?)(?=<\|user\|>|<\|assistant\|>|$)'` → mean
+   loss_mask 0.81, zero empty (matches magpie 0.83). ALWAYS verify loss_mask>0 for GLM.
+4. Extract (IN PROGRESS). **DISK CONSTRAINT**: full 4800 = 137 GB bf16; worker only 127 GB
+   free, head 87 GB, fp8 won't work (magpie is bf16, must match). → SUBSAMPLED to
+   `prepared-reasoning-sub` (first 3200, balanced, 1.24M tok, ~91 GB) = ~30% token-mix.
+   `serve-glm52-tp2-hidden.sh` (fast-build env + top-k4, HIDDEN_STATES_PATH=~/dspark-hs-staging)
+   + `data_generation_offline.py --output ~/dspark-hs-reasoning-out` → `hs_{idx}`, rsync
+   `--remove-source-files` drain head→worker DURING gen. hs is BF16 [seq,6,6144]+I64 token_ids.
+   MIXING: trainer matches `hs_{row_index}`; combined = concat(magpie 2000, reasoning-sub
+   3200) + hs = magpie hs_0..1999 + reasoning hs_i→hs_{2000+i} (magpie 2000 rows/1988 hs,
+   12 gaps ok via --on-missing skip).
+5. Mix reasoning slice + existing magpie prepared cache → fine-tune (v05 trainer on
+   worker) → `ckpt-v2`. GATE 2 coherence, then GATE 3 A/B vs 21.8/68% baseline.
+
+VENV DISCIPLINE: data-prep/gen scripts live in `~/Dev/speculators` (HEAD) and need the
+HEAD package → run them ON THE HEAD NODE (head venv = HEAD 0.7.0.dev102). The trainer
+needs v05 → runs on the WORKER (worker venv currently = v05 0.7.0.dev74). No swap needed
+if each stage runs on its correct node.
+
+## STATUS (2026-07-16, session 16) — GATE 1 PASSED (version pin fixes it); fine-tune v1 RUNNING on the worker
+
+Session 15's blocker is RESOLVED. Pinned the trainer to `21033a7` in a separate
+clone `spark-c84b:~/Dev/speculators-v05` (`pip install --no-deps -e .` into the
+`vllm-moet` venv — this SHADOWS the HEAD install; reinstall HEAD
+`pip install --no-deps -e ~/Dev/speculators` before any extract/gen). Ran the
+STEP-0 LR-0 gate on the FP8 cache: **mean position_1_acc (card "pos-0") = 0.789
+across 8 real steps** (0.788/0.835/0.780/0.875/0.713/0.667… noisy on 30 rows),
+vs the broken **0.35** at HEAD. GATE 1 PASS confirmed — the root cause was
+exactly the 07-13 speculators forward rewrites; nothing wrong with the pipeline.
+NOTE the trainer positions are **1-indexed** (position_1 = card pos-0).
+
+**Fine-tune v1 launched** (NEXT step 2): full 1988-cache, `--from-pretrained`
+epoch-3, `--lr 1e-5 --scheduler-type none --epochs 1`, Muon (lr 1e-4) + AdamW
+(1e-5), loss ce0.1/tv0.9, save → `spark-c84b:~/dspark-distill-data/ckpt-v1`,
+log `~/dspark-finetune-v1.log`. Early steps already tick up (step 15:
+position_1_acc 0.818, position_2_acc 0.729). ~8.5 s/step, ~251 tok/s →
+**ETA ~3-3.5 h for 1 epoch** (~3M tok). A background waiter fires on
+save/crash. We did NOT re-benchmark the epoch-3 baseline first (Joe's call):
+the version bug was purely in TRAINING, so re-serving the unchanged draft would
+just reproduce the documented 21.8 tok/s / 68%. A/B happens AFTER, vs that
+recorded baseline.
+
+**NEXT after v1 finishes:** GATE 2 greedy coherence spot-check, then GATE 3 —
+convert/point `--speculative-config` at ckpt-v1, serve dspark K=2 (§4b), warm
+≥10, read pos-0/1 acceptance from /metrics + tok/s via `spark/demo_chat.py`.
+Then step 3 (reasoning-heavy slice) is the real lever. Both GPUs are needed for
+the TP2 serve, so the fine-tune must be DONE (or killed) before A/B.
+
+**GATE-3 deploy recipe (pre-scouted session 16):** the fork serve loads the
+reference speculator `~/models/hf/GLM-5.2-speculator.dspark`, whose `config.json`
+has `architectures:["DSparkDraftModel"]` + `auto_map`→`config.DSparkSpeculatorConfig`
++ a bundled `config.py` + `model.safetensors` (7.6 GB). The trainer (pinned
+21033a7) saves via `draft_model.save_pretrained(save_path)`, which may emit a
+DRIFTED config (older speculators — verify architectures + auto_map + that
+config.py is present). ROBUST path: `cp -r` the reference dir → clone, overwrite
+its `model.safetensors` with `ckpt-v1/model.safetensors` IFF tensor keys match
+(check with safetensors header diff), keep the reference config.json/config.py.
+Point `--speculative-config`'s `model` at the clone. This grafts new weights
+into the proven layout and sidesteps config-format drift entirely.
+
 ## STATUS (2026-07-16, session 15) — pipeline BUILT + root-caused; blocked on speculators version drift; next = pin the trainer version
 
 Goal: raise the dspark draft's acceptance on the shipped fast-build target
