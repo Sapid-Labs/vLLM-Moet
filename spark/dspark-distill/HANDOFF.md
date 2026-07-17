@@ -4,7 +4,41 @@ Resume-here pointer for the dspark draft fine-tune. Deep docs alongside:
 `PLAN.md` (design + decisions), `FINDINGS.md` (full investigation + rule-outs).
 Convention: `~/CLAUDE.md` → "Session handoffs".
 
-## STATUS (2026-07-17, session 16g) — EFFORT CONCLUDED: epoch-3 near ceiling; dspark-distill wound down (Joe's call)
+## STATUS (2026-07-17, session 18) — EFFORT REOPENED: Sparkulator v3 (Joe's call — goal: BEAT epoch-3 on overall sparkbench mean). Phase 1 (weak-band gen) RUNNING.
+
+Full plan: `~/.claude/plans/dazzling-seeking-steele.md` (approved). Win condition =
+beat stock epoch-3 on **mean tok/s AND tok/verify across the frozen 52-prompt
+sparkbench**, back-to-back live. If val-up-live-flat repeats → fork-native training
+is pre-approved (train through the fork's own forward).
+
+- **Tooling rescued into the repo** (was in volatile /tmp): `tools/` now has
+  probe_weak_content.py, gate3_measure.py (KNOWN-BUGGY measurement — superseded),
+  gen_completions.py, build_reasoning_prompts.py, combine_datasets.py,
+  measure_decode.py, **sparkbench.py** (the fixed, canonical A/B tool:
+  usage-token decode rate + per-prompt /metrics deltas over num_drafts_total)
+  and **sparkbench-prompts.jsonl** (frozen: 40 probe + 12 held-out reasoning).
+- **Epoch-3 baseline (healthy machine, s18)** — `tools/sparkbench-epoch3-baseline-s18.json`:
+  overall **23.13 tok/s, pos-0 0.743, pos-1 0.523, tok/verify 2.266**. Weak band
+  confirmed: code_explain 0.662, creative 0.683 (pos-1 0.359!), summarize 0.706,
+  code_gen 0.708. Strong: math 0.875, logic 0.777, heldout_reasoning 0.763.
+  (Session-16 absolute tok/s numbers were environmental garbage — see
+  `../handoffs/04-decode-throughput-regression.md` RESOLUTION. Protocol now:
+  fresh cluster+serve, warm ≥8, same-session A/B only.)
+- **Weak-band dataset built** (`tools/build_weak_prompts.py`, seed 0):
+  `~/dspark-distill-data/weak-prompts-train.jsonl` (4320: creative 1080,
+  chat_open 900, summarize 720, code_explain 720, code_gen 540, structured 360)
+  + `weak-prompts-holdout.jsonl` (480, never trained, for the final A/B).
+- **Phase 1 gen RUNNING**: throughput serve (s16b recipe, `~/serve-gen-throughput.log`)
+  + `gen_completions.py --concurrency 16` → `~/dspark-distill-data/weak-completions.jsonl`
+  (log `~/gen-weak.log`, resumable). ETA ~5 h from 2026-07-17 ~12:00.
+- **Worker disk**: freed shift-test + fp8-test-ckpt (~14 GB) → 119 GB free
+  (extraction needs ~91 GB). KEPT `~/dspark-hs-fp8test` — GATE-1 step-0 needs it.
+- NEXT after gen: prepare_data w/ the GLM assistant pattern (verify loss_mask!),
+  subsample if needed, extract via serve-glm52-tp2-hidden.sh + drain, assemble
+  prepared-combined-v3 (magpie 2000 + weak 3200), GATE-1, train lr 1e-5 from
+  epoch-3, live-probe each ckpt with sparkbench.py (NEVER select by trainer val).
+
+## STATUS (2026-07-17, session 16g) — EFFORT CONCLUDED: epoch-3 near ceiling; dspark-distill wound down (Joe's call) — **REOPENED in s18 above**
 
 Ran an empirical weak-content probe on epoch-3 (40 prompts, 10 categories, per-prompt
 /metrics acceptance). Result — pos-0 by category, weakest→strongest:
