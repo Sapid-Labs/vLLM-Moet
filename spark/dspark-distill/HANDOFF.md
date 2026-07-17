@@ -28,15 +28,26 @@ is pre-approved (train through the fork's own forward).
   `~/dspark-distill-data/weak-prompts-train.jsonl` (4320: creative 1080,
   chat_open 900, summarize 720, code_explain 720, code_gen 540, structured 360)
   + `weak-prompts-holdout.jsonl` (480, never trained, for the final A/B).
-- **Phase 1 gen RUNNING**: throughput serve (s16b recipe, `~/serve-gen-throughput.log`)
-  + `gen_completions.py --concurrency 16` → `~/dspark-distill-data/weak-completions.jsonl`
-  (log `~/gen-weak.log`, resumable). ETA ~5 h from 2026-07-17 ~12:00.
-- **Worker disk**: freed shift-test + fp8-test-ckpt (~14 GB) → 119 GB free
-  (extraction needs ~91 GB). KEPT `~/dspark-hs-fp8test` — GATE-1 step-0 needs it.
-- NEXT after gen: prepare_data w/ the GLM assistant pattern (verify loss_mask!),
-  subsample if needed, extract via serve-glm52-tp2-hidden.sh + drain, assemble
-  prepared-combined-v3 (magpie 2000 + weak 3200), GATE-1, train lr 1e-5 from
-  epoch-3, live-probe each ckpt with sparkbench.py (NEVER select by trainer val).
+- **Phase 1 DONE (2026-07-17 eve)**: 4320/4320 greedy completions →
+  `~/dspark-distill-data/weak-completions.jsonl` (one mid-run engine crash —
+  `RPC call to sample_tokens timed out` after ~3.3 h sustained batch — resumed at
+  concurrency 12 after a fresh cluster restart, 0 errors). prepare_data with the
+  explicit GLM assistant pattern: **loss_mask 0.796/0.797 mean, 0 empty** (gate PASS).
+  Stratified 3200-row subsample → `prepared-weak-sub` (on both nodes).
+- **Phase 2 DONE**: hidden states extracted on the fast-build hidden serve
+  (3199/3200, sample 0 skipped, ~50 min at concurrency 4) and drained to
+  `spark-c84b:~/dspark-hs-weak` (90 GB; worker now ~30 GB free — tight, watch it).
+  Combined dataset assembled on the worker: `prepared-combined-v3` = 5200 rows
+  (magpie 2000 + weak 3200), 5187 hs links, max index check OK
+  (`tools/combine_datasets_v3.py`).
+- **Phase 3 RUNNING**: GATE-1 step-0 LR-0 **PASS (pos-0 epoch 0.832** vs broken 0.35);
+  fine-tune v3 launched on the worker (`~/dspark-finetune-v3.log`, pinned v05 trainer,
+  from epoch-3, lr 1e-5, 1 epoch, save `~/dspark-distill-data/ckpt-v3`). ETA ~2-6 h.
+- NEXT after train: GATE-2 coherence spot-check, graft ckpt-v3/0 weights into a clone
+  of the reference speculator dir, serve §4b with `SPECULATOR=<clone>`, live-probe with
+  `tools/sparkbench.py` (NEVER select by trainer val), then Phase-4 back-to-back A/B
+  vs epoch-3 under the clean-restart protocol. Weak-category targets: creative
+  0.683→≥0.72, code_explain 0.662→≥0.70.
 
 ## STATUS (2026-07-17, session 16g) — EFFORT CONCLUDED: epoch-3 near ceiling; dspark-distill wound down (Joe's call) — **REOPENED in s18 above**
 
