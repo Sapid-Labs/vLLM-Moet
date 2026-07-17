@@ -1,11 +1,52 @@
-# HANDOFF — decode throughput regression: dspark K=2 = 10.4 tok/s (was 21.8)
+# HANDOFF — decode throughput regression: dspark K=2 = 10.4 tok/s (was 21.8) — ✅ RESOLVED session 18: NOT REPRODUCIBLE after clean restart
 
 Resume-here for the investigation into why GLM-5.2 dspark K=2 single-stream decode
 measures ~10.4 tok/s now vs the documented 21.8 (session 14). Written 2026-07-17
 (session 17). Deep context: `MTP-DRAFT-COST.md` (the draft-cost thesis this confirms),
 `RUNBOOK.md` §4b (the config), `handoffs/03-*.md` (the 21.8/15.6 baselines).
 
-## STATUS — regression LOCALIZED to the verify per-position expert-read; NOT draft, NOT hardware. Needs kernel profiling, not more black-box serve-measure.
+## RESOLUTION (2026-07-17, session 18) — regression VANISHED on a clean Ray restart + relaunch; environment, not code
+
+Re-served the identical §4b config (same venvs, same planes, same speculator, same
+serve command) after a clean `start-ray-cluster.sh` and got **21.1–26.1 tok/s warm**
+(20 runs, 4 rotating prompts; 21.1 on the transformer-explain prompt, 24.5–26.1 on
+code/math prompts), acceptance 0.74/0.50, tok/verify 2.24 — at or ABOVE the
+documented 21.8, coherent output. The draft is net-positive again. Nothing was
+changed to get this: static state was verified byte-level first (see below).
+
+- **Code/config archaeology (all clean, do not redo):** reconstructed the pre-distill
+  `deepseek_v2.py` from the pristine vllm-0.24.0 wheel + `patch/vllm-moet-v0.24.0.patch`
+  + `patch/nvfp4-dense.patch` and diffed vs installed — the ONLY delta on both nodes is
+  the session-15 distill patch's 6-line aux-hidden-state append, gated on
+  `end_layer in aux_hidden_state_layers`, which is FALSE at serve time (speculator aux
+  layers = [8,23,39,55,70]) → inert. `example_hidden_states_connector.py` is inert
+  without a kv-transfer config. Every other venv file changed since session 14 is the
+  dspark port itself (already verified byte-identical in s17). Model config.json
+  (md5-identical both nodes, mtime Jul 9), planes dirs (Jul 14), serve scripts
+  (unchanged since commit 1bae9e1), speculator dir — all untouched.
+- **Draft-side cost profiled** (`_DSPARK_PROFILE` hardcoded on both nodes, since
+  reverted): per spec step `ctxkv+inputs` ~78–85 ms (sync-inclusive — this timer
+  absorbs the async verify tail, so it is NOT pure precompute cost), `draft_fwd`
+  ~10 ms, `markov_sample` ~4.7 ms. Consistent with a healthy ~100 ms step.
+- **Best explanation for the s17 10.4:** the measurements were taken in a degraded
+  environment — that session fought a 100%-full worker disk, repeated failed Ray/serve
+  launches in one long-lived Ray session, and ran C-state/spinner experiments around
+  the measurements (the spinner alone was shown to drop dspark to 7.5). The s17
+  session did NOT re-measure after a clean cluster restart; session 18's first clean
+  restart erased the regression. Exact mechanism not pinned (candidates: polluted
+  long-lived Ray session state, page-cache/memory pressure from the 205 GB distill
+  cache churn, contaminated host CPU).
+- **Protocol going forward:** before believing any regression, re-measure after
+  `pkill -9 EngineCore` (both nodes) + `ray stop --force` (both) +
+  `start-ray-cluster.sh` + a fresh serve, warm ≥8 runs. And note prompt-dependence:
+  the SAME warm server spans 21–26 tok/s across prompt categories (acceptance is
+  content-bound), so compare only same-prompt-set numbers.
+- The s17 verify-side inference below ("regression is in the multi-position verify
+  expert-gather") is therefore MOOT — it explained numbers that were environmental.
+- Machine state: deep C-states (state2/state3) still DISABLED on both nodes (s17
+  leftover, survives until reboot; revert needs sudo).
+
+## ORIGINAL STATUS (s17, superseded) — regression LOCALIZED to the verify per-position expert-read; NOT draft, NOT hardware. Needs kernel profiling, not more black-box serve-measure.
 
 Symptom (measured this session, both v2 AND epoch-3 speculators, identical):
 | config (fast build §4b, top-k4, greedy 300-tok, streamed) | now | documented (s14) |

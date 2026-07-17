@@ -6,7 +6,9 @@ lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
 **`spark/MTP-DRAFT-COST.md` (the hard vLLM problem → 30 tok/s: make the MTP draft
 forward cheap; the drafter is PIECEWISE-cudagraphed while the verify is FULL).**
 
-## STATUS (2026-07-17, session 17) — ⚠️ DECODE THROUGHPUT REGRESSION: dspark K=2 now 10.4 tok/s (was 21.8), draft NET-NEGATIVE (below the no-draft floor). Localized to the VERIFY per-position expert-read; hardware/draft-code/config all proven clean. Full diagnostic + next-steps: **`spark/handoffs/04-decode-throughput-regression.md`**. (Machine left with deep C-states disabled — see that doc to revert.)
+## STATUS (2026-07-17, session 18) — ✅ REGRESSION RESOLVED: not reproducible. Clean Ray restart + fresh §4b serve → dspark K=2 = **21.1–26.1 tok/s warm** (≥ the documented 21.8), acceptance 0.74/0.50, coherent. Code/config verified byte-clean first (incl. reconstructing pre-distill `deepseek_v2.py` from the pristine wheel — the distill patch is inert at serve time). The s17 10.4 was environmental (measured amid full-disk/Ray-thrash without a clean restart; exact mechanism unpinned). **Protocol: never trust a perf number not taken on a freshly restarted cluster, warm ≥8 runs, same prompt set** (same server spans 21–26 across prompt categories). Server left UP on :8000 (§4b, `~/serve-dspark-best.log`). Deep C-states still disabled both nodes (sudo to revert). Full write-up: **`spark/handoffs/04-decode-throughput-regression.md`** (RESOLUTION section).
+
+## STATUS (2026-07-17, session 17, SUPERSEDED — resolved in s18 above) — ⚠️ DECODE THROUGHPUT REGRESSION: dspark K=2 now 10.4 tok/s (was 21.8), draft NET-NEGATIVE (below the no-draft floor). Localized to the VERIFY per-position expert-read; hardware/draft-code/config all proven clean. Full diagnostic + next-steps: **`spark/handoffs/04-decode-throughput-regression.md`**. (Machine left with deep C-states disabled — see that doc to revert.)
 
 
 ## STATUS (2026-07-16, session 15) — DSpark self-distill pipeline BUILT + root-caused; blocked on speculators version drift → resume in `spark/dspark-distill/HANDOFF.md`
