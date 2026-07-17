@@ -6,6 +6,8 @@ lever, full design/repro), `spark/GOAL.md` (20 tok/s plan), `spark/RUNBOOK.md`
 **`spark/MTP-DRAFT-COST.md` (the hard vLLM problem → 30 tok/s: make the MTP draft
 forward cheap; the drafter is PIECEWISE-cudagraphed while the verify is FULL).**
 
+## STATUS (2026-07-17, session 17) — ⚠️ DECODE THROUGHPUT REGRESSION: dspark K=2 now 10.4 tok/s (was 21.8), draft NET-NEGATIVE (below the no-draft floor). Localized to the VERIFY per-position expert-read; hardware/draft-code/config all proven clean. Full diagnostic + next-steps: **`spark/handoffs/04-decode-throughput-regression.md`**. (Machine left with deep C-states disabled — see that doc to revert.)
+
 
 ## STATUS (2026-07-16, session 15) — DSpark self-distill pipeline BUILT + root-caused; blocked on speculators version drift → resume in `spark/dspark-distill/HANDOFF.md`
 
