@@ -1,0 +1,296 @@
+{
+  "rows": [
+    {
+      "cat": "code_gen",
+      "pos0": 0.708029197080292,
+      "pos1": 0.48175182481751827,
+      "prompt": "Write a Python function that merges two sorted linked lists into one sorted list."
+    },
+    {
+      "cat": "code_gen",
+      "pos0": 0.6089743589743589,
+      "pos1": 0.3141025641025641,
+      "prompt": "Implement a debounce decorator in Python with a configurable delay."
+    },
+    {
+      "cat": "code_gen",
+      "pos0": 0.6838235294117647,
+      "pos1": 0.5220588235294118,
+      "prompt": "Write a SQL query to find the second-highest salary in an employees table."
+    },
+    {
+      "cat": "code_gen",
+      "pos0": 0.8717948717948718,
+      "pos1": 0.7008547008547008,
+      "prompt": "Write a Rust function that returns the nth Fibonacci number iteratively."
+    },
+    {
+      "cat": "code_explain",
+      "pos0": 0.7633587786259542,
+      "pos1": 0.5190839694656488,
+      "prompt": "Explain what this does: `df.groupby('k')['v'].transform(lambda x: x - x.mean())`."
+    },
+    {
+      "cat": "code_explain",
+      "pos0": 0.6690647482014388,
+      "pos1": 0.48201438848920863,
+      "prompt": "Explain the difference between `git rebase` and `git merge` and when to use each."
+    },
+    {
+      "cat": "code_explain",
+      "pos0": 0.7318840579710145,
+      "pos1": 0.4492753623188406,
+      "prompt": "Walk through how a Bloom filter works and its false-positive tradeoff."
+    },
+    {
+      "cat": "code_explain",
+      "pos0": 0.6875,
+      "pos1": 0.3958333333333333,
+      "prompt": "Explain Python's GIL and how it affects multithreaded CPU-bound code."
+    },
+    {
+      "cat": "math_derivation",
+      "pos0": 0.9272727272727272,
+      "pos1": 0.8,
+      "prompt": "Derive the quadratic formula from ax^2 + bx + c = 0 by completing the square."
+    },
+    {
+      "cat": "math_derivation",
+      "pos0": 0.908256880733945,
+      "pos1": 0.8348623853211009,
+      "prompt": "Compute the derivative of f(x) = x^3 ln(x) and show each step."
+    },
+    {
+      "cat": "math_derivation",
+      "pos0": 0.944954128440367,
+      "pos1": 0.8073394495412844,
+      "prompt": "A fair coin is flipped 10 times. What is the probability of exactly 6 heads? Show work."
+    },
+    {
+      "cat": "math_derivation",
+      "pos0": 0.8536585365853658,
+      "pos1": 0.5853658536585366,
+      "prompt": "Solve the recurrence T(n) = 2T(n/2) + n using the master theorem, with steps."
+    },
+    {
+      "cat": "science_derivation",
+      "pos0": 0.708029197080292,
+      "pos1": 0.4744525547445255,
+      "prompt": "Derive the equation for the period of a simple pendulum from first principles."
+    },
+    {
+      "cat": "science_derivation",
+      "pos0": 0.7101449275362319,
+      "pos1": 0.463768115942029,
+      "prompt": "Explain why the sky is blue in terms of Rayleigh scattering, step by step."
+    },
+    {
+      "cat": "science_derivation",
+      "pos0": 0.7952755905511811,
+      "pos1": 0.5590551181102362,
+      "prompt": "Balance this reaction and explain: C3H8 + O2 -> CO2 + H2O."
+    },
+    {
+      "cat": "science_derivation",
+      "pos0": 0.6762589928057554,
+      "pos1": 0.4748201438848921,
+      "prompt": "Explain how a transistor amplifies a signal, at the level of electrons."
+    },
+    {
+      "cat": "logic_reasoning",
+      "pos0": 0.8583333333333333,
+      "pos1": 0.65,
+      "prompt": "Three switches control one bulb in another room; you may enter once. How do you find which switch?"
+    },
+    {
+      "cat": "logic_reasoning",
+      "pos0": 0.7132352941176471,
+      "pos1": 0.49264705882352944,
+      "prompt": "If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops Lazzies? Explain."
+    },
+    {
+      "cat": "logic_reasoning",
+      "pos0": 0.7557251908396947,
+      "pos1": 0.5267175572519084,
+      "prompt": "You have 8 balls, one heavier. With a balance scale and 2 weighings, find it. Explain."
+    },
+    {
+      "cat": "logic_reasoning",
+      "pos0": 0.7857142857142857,
+      "pos1": 0.5952380952380952,
+      "prompt": "A bat and ball cost $1.10; the bat costs $1 more than the ball. How much is the ball? Explain."
+    },
+    {
+      "cat": "factual_short",
+      "pos0": 0.627906976744186,
+      "pos1": 0.27906976744186046,
+      "prompt": "What is the capital of Australia?"
+    },
+    {
+      "cat": "factual_short",
+      "pos0": 0.7751937984496124,
+      "pos1": 0.5426356589147286,
+      "prompt": "Who wrote the novel 'Pride and Prejudice'?"
+    },
+    {
+      "cat": "factual_short",
+      "pos0": 0.8672566371681416,
+      "pos1": 0.7876106194690266,
+      "prompt": "What year did the Berlin Wall fall?"
+    },
+    {
+      "cat": "factual_short",
+      "pos0": 0.751937984496124,
+      "pos1": 0.3953488372093023,
+      "prompt": "What is the chemical symbol for gold?"
+    },
+    {
+      "cat": "creative_writing",
+      "pos0": 0.7142857142857143,
+      "pos1": 0.4357142857142857,
+      "prompt": "Write the opening paragraph of a mystery novel set on a rainy night."
+    },
+    {
+      "cat": "creative_writing",
+      "pos0": 0.7482014388489209,
+      "pos1": 0.4028776978417266,
+      "prompt": "Write a short poem about the ocean at dawn."
+    },
+    {
+      "cat": "creative_writing",
+      "pos0": 0.6808510638297872,
+      "pos1": 0.44680851063829785,
+      "prompt": "Invent a dialogue between a robot and a cat who just met."
+    },
+    {
+      "cat": "creative_writing",
+      "pos0": 0.5569620253164557,
+      "pos1": 0.33544303797468356,
+      "prompt": "Describe a bustling alien marketplace in vivid sensory detail."
+    },
+    {
+      "cat": "summarize_rewrite",
+      "pos0": 0.6643356643356644,
+      "pos1": 0.42657342657342656,
+      "prompt": "Summarize the plot of Romeo and Juliet in three sentences."
+    },
+    {
+      "cat": "summarize_rewrite",
+      "pos0": 0.7333333333333333,
+      "pos1": 0.4962962962962963,
+      "prompt": "Rewrite this formally: 'hey can u send me the thing when u get a sec thx'."
+    },
+    {
+      "cat": "summarize_rewrite",
+      "pos0": 0.7769230769230769,
+      "pos1": 0.5307692307692308,
+      "prompt": "Explain photosynthesis to a five-year-old."
+    },
+    {
+      "cat": "summarize_rewrite",
+      "pos0": 0.7089552238805971,
+      "pos1": 0.5373134328358209,
+      "prompt": "Condense the causes of World War I into a short bulleted list."
+    },
+    {
+      "cat": "structured_output",
+      "pos0": 0.7663551401869159,
+      "pos1": 0.6261682242990654,
+      "prompt": "Return a JSON object describing a book with title, author, year, and genres (array)."
+    },
+    {
+      "cat": "structured_output",
+      "pos0": 0.5897435897435898,
+      "pos1": 0.3269230769230769,
+      "prompt": "Make a markdown table comparing REST and GraphQL across 4 dimensions."
+    },
+    {
+      "cat": "structured_output",
+      "pos0": 0.8823529411764706,
+      "pos1": 0.803921568627451,
+      "prompt": "List the first 10 prime numbers, comma-separated, nothing else."
+    },
+    {
+      "cat": "structured_output",
+      "pos0": 0.746268656716418,
+      "pos1": 0.48507462686567165,
+      "prompt": "Output a YAML config for a web server with port, host, and 3 routes."
+    },
+    {
+      "cat": "chat_open",
+      "pos0": 0.784,
+      "pos1": 0.608,
+      "prompt": "I'm feeling overwhelmed at work lately. Any advice?"
+    },
+    {
+      "cat": "chat_open",
+      "pos0": 0.6928571428571428,
+      "pos1": 0.44285714285714284,
+      "prompt": "What's a good weekend project for someone learning electronics?"
+    },
+    {
+      "cat": "chat_open",
+      "pos0": 0.6934306569343066,
+      "pos1": 0.48905109489051096,
+      "prompt": "Recommend three sci-fi books and say why in one line each."
+    },
+    {
+      "cat": "chat_open",
+      "pos0": 0.7101449275362319,
+      "pos1": 0.463768115942029,
+      "prompt": "How do you stay motivated when learning something hard?"
+    }
+  ],
+  "summary": {
+    "code_gen": {
+      "pos0": 0.718,
+      "pos1": 0.505,
+      "n": 4
+    },
+    "code_explain": {
+      "pos0": 0.713,
+      "pos1": 0.462,
+      "n": 4
+    },
+    "math_derivation": {
+      "pos0": 0.909,
+      "pos1": 0.757,
+      "n": 4
+    },
+    "science_derivation": {
+      "pos0": 0.722,
+      "pos1": 0.493,
+      "n": 4
+    },
+    "logic_reasoning": {
+      "pos0": 0.778,
+      "pos1": 0.566,
+      "n": 4
+    },
+    "factual_short": {
+      "pos0": 0.756,
+      "pos1": 0.501,
+      "n": 4
+    },
+    "creative_writing": {
+      "pos0": 0.675,
+      "pos1": 0.405,
+      "n": 4
+    },
+    "summarize_rewrite": {
+      "pos0": 0.721,
+      "pos1": 0.498,
+      "n": 4
+    },
+    "structured_output": {
+      "pos0": 0.746,
+      "pos1": 0.561,
+      "n": 4
+    },
+    "chat_open": {
+      "pos0": 0.72,
+      "pos1": 0.501,
+      "n": 4
+    }
+  }
+}
