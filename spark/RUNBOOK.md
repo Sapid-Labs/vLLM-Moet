@@ -16,15 +16,19 @@ CUDA 13, driver 580.159.03).
   and — once experts were 2-bit — *attention* was ~60% of the per-token byte
   read while still at FP8, so cutting it to 4-bit bought ~1.33×. Progression:
   FP8-attn 15.0 → NVFP4 big-3 (`o/q_b/kv_b`) ~18 → full attention+shared ~20.
-  See `spark/NVFP4-DENSE.md`. **Quality of the NVFP4 build not yet re-evaluated**
-  (rel-L1 ~0.09 on the quantized weights; eval pending). Real-world *sampled*
-  throughput varies ~13-20 (MTP acceptance depends on how well the draft
-  matches the sampled token; greedy shows the clean ~20).
+  See `spark/NVFP4-DENSE.md`. **Quality verdict (s11, handoff 05): big-3 is
+  safe; the full attention+shared cut DEGRADES — current builds (§4b) ship
+  big-3 only.** All other dense linears remain FP8; routed experts are 2-bit
+  planes. Current best is §4b's 24.3 tok/s (big-3 + REAP + top-k4 + dspark K=3,
+  GSM8K-50 92%). Real-world *sampled* throughput varies with draft acceptance;
+  greedy shows the clean number.
   The prior shipped config (**15.0 tok/s, quality battery clean, GSM8K 91%**)
   stacks three levers (sessions 1-8, `spark/handoffs/02-*.md`): FULL cudagraphs
   over RoCE (needs NCCL 2.30.7), expert-pruned planes (256→208/layer — shrinks
   planes 97→79 GB/rank so they fit page cache; decode goes fault-free), and MTP
-  speculative decode k=1. Routing stays at native top-k=8. NVFP4-attn stacks on
+  speculative decode k=1. That legacy config kept routing at native top-k=8;
+  the current fast build (§4b) overrides to top-k=4 (`num_experts_per_tok: 4`,
+  the s12 win — all s18/s19 records measured there). NVFP4-attn stacks on
   top of all three.
 - GLM-5.2 PP2 fallback: ~5.5 tok/s single-stream, ~17 tok/s aggregate at
   8 streams. Simpler, no NCCL version pin; keep it in your pocket if TP2
