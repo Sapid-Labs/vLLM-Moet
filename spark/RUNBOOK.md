@@ -245,6 +245,15 @@ What the scripts encode (don't skip these if you roll your own):
   per-node memory commitments sum above physical.
 - **`ray status` shows 1 node**: peer raylet died or wrong IP; rerun
   `start-ray-cluster.sh` (it force-stops both sides first).
+- **Serve dies idle with `EngineDeadError` + raylet `file_system_monitor` spam
+  ("/tmp/ray/... is over 95% full") in the minutes before** (s19, 2026-07-18):
+  Ray's disk watchdog. Both nodes chronically sit >95% (the hs caches alone
+  preclude going under), so `start-ray-cluster.sh` now sets
+  `RAY_local_fs_capacity_threshold=1` to disable it. Related discovery: the
+  head's "disk full" was partly ~700 GB of deleted-but-open files pinned by
+  long-running serve/Ray process trees — freed the moment the serve died
+  (`df` 69 G → 765 G free). If a node looks impossibly full, check
+  `lsof +L1 | awk '$7>1e9'` before deleting anything real.
 - **Stuck placement groups after a failed launch**: `ray stop --force` on
   both nodes, `pkill -9 -f EngineCore`, restart the cluster.
 - **nvidia-smi shows no memory numbers**: normal on GB10; watch `free -g`.

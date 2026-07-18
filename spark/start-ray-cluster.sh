@@ -31,7 +31,7 @@ VENV="$HOME/venvs/vllm-moet"
 # in NCCL regularly, so we test 2.30.7 (staged at ~/nccl-2.30.7 on both nodes).
 # Must live on the raylet — actors load NCCL per the raylet env, not the driver.
 NCCL_SO="$HOME/nccl-2.30.7/libnccl.so.2"
-COMMON="RAY_memory_monitor_refresh_ms=0 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
+COMMON="RAY_memory_monitor_refresh_ms=0 RAY_local_fs_capacity_threshold=1 NCCL_IB_DISABLE=0 NCCL_IB_HCA=rocep1s0f1 \
 NCCL_SOCKET_IFNAME=enp1s0f1np1 GLOO_SOCKET_IFNAME=enp1s0f1np1 \
 NCCL_GRAPH_MIXING_SUPPORT=1 VLLM_NCCL_SO_PATH=$NCCL_SO MALLOC_MMAP_THRESHOLD_=65536"
 
