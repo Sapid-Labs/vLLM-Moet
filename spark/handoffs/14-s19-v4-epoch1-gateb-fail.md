@@ -41,18 +41,36 @@ gate (e.g. epoch 2 / higher LR on the new columns). Resting §4b serve restored.
   ran through this same fork path. Trainer-space AND live-space both flat —
   unlike v2 (trainer up, live flat), there is no transfer gap to chase: after
   one epoch the final-state channel simply hasn't converted to acceptance.
-- Open question the gate leaves unanswered: whether 1 epoch @ lr 1e-5 is just
-  too gentle for a zero-init pathway (the block grew to only ~8% relative
-  magnitude), vs the bet itself being wrong (parallel drafting caps acceptance
-  regardless of conditioning). The frozen protocol deliberately does not let us
-  spend more compute to find out without an explicit decision.
+- **Why slightly WORSE, not just flat:** (a) boot band — epoch-3 pos-0
+  reproduces at 0.739–0.748 across restarts, so 0.733 is at the band's edge;
+  (b) the real component is **fine-tune drift, reproducing v3's pattern**: one
+  epoch on the magpie+weak mix moved the proven old weights (drift norm 12.1)
+  and v3 landed at live pos-0 0.732 vs v4e1's 0.733 — same ~1 pt fine-tune tax,
+  and the new channel paid no dividend to offset it.
+- **Blind spot the gate leaves open:** the trainer VAL split is the weak band,
+  where s18 proved NO draft (MTP included) can gain — flat there was expected
+  and carries no information about the thesis. The conditioning bet's payoff,
+  if any, lives on the reasoning/math/structured bands. Nothing measured today
+  looked there in trainer space.
+- Also open: 1 epoch @ lr 1e-5 grew the zero-init block to only ~8% relative
+  magnitude — "undertrained pathway" is not excluded by today's data.
 
-## NEXT (Joe decides)
+## NEXT (Joe decides) — options ranked by information-per-cost
 
-1. **Close per §7** — keep epoch-3, done; or
-2. **Overrule GATE B once**: epoch 2 (resume from ckpt-v4/0, same data) and/or
-   a targeted LR bump on the new fc columns; re-probe live. If overruling,
-   pre-commit the new bar first.
+1. **Reasoning-band trainer eval (no training, ~30–60 min GPU):** LR-0 of
+   ckpt-v4/0 vs epoch-3 on `~/dspark-distill-data/prepared-reasoning-sub`
+   (both with DSPARK_V4_ALL_CHANNELS set appropriately). If v4 lifts there in
+   trainer space → thesis alive, problem is transfer/deployment; if flat →
+   conditioning bet is dead with high confidence. THE cheap decisive probe.
+2. **Freeze-old / train-new-only at higher LR (~2–3 h):** param-group freeze on
+   all epoch-3 weights, 10× LR on the new fc columns only. Kills the drift
+   confound AND the undertraining objection in one run. Pre-commit a bar first.
+3. Plain epoch 2 — weakest (v3 precedent: drift compounds).
+4. +2 on-policy data rounds (~2 serve-days) — design §5.1 pre-committed this
+   "before concluding anything", but trainer-space flatness lowers its prior.
+5. Fork-native training (v3 Phase 5) — no mismatch signature to chase here;
+   low prior, high effort.
+6. **Close per §7** — keep epoch-3 (which already beats native MTP here).
 
 ## HOW TO RESUME / RE-RUN
 
