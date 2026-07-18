@@ -66,14 +66,28 @@
         },
         {
           "id": "commit-handoff",
-          "title": "Commit dspark-port changes + write handoff 13",
+          "title": "Commit dspark-port changes + write handoff 13 (02f35da on spark-gb10)",
           "owner": "agent",
-          "status": "in_progress",
+          "status": "done",
           "subtasks": []
         },
         {
           "id": "greenlight-v4",
-          "title": "Decide whether to proceed to Sparkulator v4 training (trainer surgery + GATE A)",
+          "title": "v4 green-lit and executed same day: surgery + GATE A PASS (0.7724==0.773); epoch-1 trained (new fc block norm 31.8, trainer-val flat)",
+          "owner": "user",
+          "status": "done",
+          "subtasks": []
+        },
+        {
+          "id": "gate-b-verdict",
+          "title": "GATE B live probe FAIL: pos-0 0.733 / 24.06 tok/s vs bar 0.768 (epoch-3: 0.742 / 24.40) — pre-registered stop triggered; recorded in handoff 14",
+          "owner": "agent",
+          "status": "done",
+          "subtasks": []
+        },
+        {
+          "id": "close-or-overrule",
+          "title": "Decide: close speculator track per design §7 (keep epoch-3), or overrule GATE B once for epoch 2 with a pre-committed bar",
           "owner": "user",
           "status": "todo",
           "subtasks": []

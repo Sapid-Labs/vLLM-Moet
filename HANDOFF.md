@@ -5,13 +5,14 @@ in order for the full journey. This root file is only a pointer: current status,
 latest handoff, index. Update it (pointer + index line) in the same commit as each
 new numbered handoff.
 
-## CURRENT STATUS → `spark/handoffs/13-s19-dynamic-k-null.md`
+## CURRENT STATUS → `spark/handoffs/14-s19-v4-epoch1-gateb-fail.md`
 
-One line: best = dspark K=3 ≈ 24.3 tok/s serving on :8000; **workstream 0
-(confidence-gated dynamic K) measured NULL s19** — trimming any position loses
-~4–6 tok/s on this bandwidth-bound stack (dense bytes paid per step, not per K);
-v4 (`spark/SPARKULATOR-DESIGN.md`) must win on acceptance lift alone, dynamic-K
-fallback is dead. v4 training not started. Keep the worker hs caches (training set).
+One line: best = dspark K=3 ≈ 24.3 tok/s serving on :8000; s19 ran BOTH
+Sparkulator v4 workstreams to verdicts in one day: **workstream 0 (dynamic K)
+NULL** (handoff 13 — trimming loses on this bandwidth-bound stack) and **v4
+epoch-1 GATE B FAIL** (handoff 14 — surgery+GATE A clean, trained, live pos-0
+0.733 vs bar 0.768; flat everywhere). Awaiting Joe: close speculator track per
+design §7, or overrule the gate for epoch 2. Keep the worker hs caches.
 
 ## JOURNEY INDEX (chronological)
 
@@ -30,6 +31,7 @@ fallback is dead. v4 training not started. Keep the worker hs caches (training s
 | `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md` | s18 overnight: K=3 new best 24.3; siro1 A/B loses; site rows + GSM8K-50 |
 | `spark/handoffs/12-sparkulator-v4-design.md` | Sparkulator v4 design (final-state conditioning + dynamic K) — not started |
 | `spark/handoffs/13-s19-dynamic-k-null.md` | s19: workstream 0 (dynamic K) built + measured NULL; per-position verify cost is small, trimming loses; v4 = acceptance lift only |
+| `spark/handoffs/14-s19-v4-epoch1-gateb-fail.md` | s19: v4 surgery+GATE A clean, epoch-1 trained, GATE B live probe FAIL (0.733 vs 0.768 bar) — stop condition triggered, Joe to decide |
 
 Sub-project logs: `spark/dspark-distill/` (HANDOFF.md, PLAN.md, FINDINGS.md, tools/).
 Deep reference docs: `spark/NVFP4-DENSE.md`, `spark/GOAL.md`, `spark/RUNBOOK.md`,

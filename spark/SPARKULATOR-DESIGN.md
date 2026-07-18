@@ -77,6 +77,13 @@ v4 is never built.
 - Cost delta at inference: one extra 6144-vector per context token into the fc —
   negligible vs the 32 ms verify tax.
 
+> **STATUS (s19, 2026-07-18): built through GATE B, which FAILED at epoch 1.**
+> Surgery + GATE A clean (0.7724 ≡ epoch-3's 0.773); epoch 1 on combined-v3
+> (lr 1e-5); new fc block learned (norm 31.8) but trainer-val flat AND live
+> probe flat: pos-0 0.733 / 24.06 tok/s vs 0.742 / 24.40 (bar 0.768). The
+> pre-registered stop triggered — no epoch 2 without an explicit overrule.
+> Details: `handoffs/14-s19-v4-epoch1-gateb-fail.md`.
+
 ## 5. Training plan (reuses the v3 pipeline end-to-end)
 
 1. **Data — already on disk (do NOT reclaim these while this is open):**
