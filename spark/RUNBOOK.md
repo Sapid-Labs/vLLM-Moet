@@ -247,13 +247,24 @@ What the scripts encode (don't skip these if you roll your own):
   `start-ray-cluster.sh` (it force-stops both sides first).
 - **Serve dies idle with `EngineDeadError` + raylet `file_system_monitor` spam
   ("/tmp/ray/... is over 95% full") in the minutes before** (s19, 2026-07-18):
-  Ray's disk watchdog. Both nodes chronically sit >95% (the hs caches alone
-  preclude going under), so `start-ray-cluster.sh` now sets
-  `RAY_local_fs_capacity_threshold=1` to disable it. Related discovery: the
-  head's "disk full" was partly ~700 GB of deleted-but-open files pinned by
-  long-running serve/Ray process trees — freed the moment the serve died
-  (`df` 69 G → 765 G free). If a node looks impossibly full, check
-  `lsof +L1 | awk '$7>1e9'` before deleting anything real.
+  Ray's disk watchdog CAN do this at >95% full (chronic here), so
+  `start-ray-cluster.sh` now sets `RAY_local_fs_capacity_threshold=1` to
+  disable it. But if the next boot hits `FileNotFoundError` on model shards,
+  see the next entry — the s19 idle death was most likely the serve's weights
+  being deleted from under it, with the watchdog as an innocent bystander.
+- **UNSOLVED INCIDENT (s19, 2026-07-18 ~17:55): all 141 GLM-5.2-FP8 base
+  shards (~700 GB) were deleted from the HEAD's `~/models/hf/GLM-5.2-FP8/`**
+  between 17:31 (a serve successfully opened them) and 17:55 (dir mtime; next
+  boot FileNotFoundError). The running serve kept working off open fds — its
+  death at 17:54 released the pinned space (`df` used 3.5T→2.8T), which is the
+  tell: **if `df` "frees" hundreds of GB when a serve dies, model files were
+  deleted while pinned — CHECK `ls ~/models/hf/GLM-5.2-FP8/model-*.safetensors
+  | wc -l` (must be 141) before celebrating.** Ruled out: purge-cache.py
+  (fadvise-only), start-ray-cluster.sh, cron/systemd timers, bash history,
+  journal. Deleter unidentified. Restored via fabric rsync from the worker's
+  intact copy (141/141, spot md5s verified, ~15 min). If it recurs: enable
+  auditd unlink rules on ~/models; the serve-health monitor pattern with a
+  shard-count tripwire is in handoff 14's session notes.
 - **Stuck placement groups after a failed launch**: `ray stop --force` on
   both nodes, `pkill -9 -f EngineCore`, restart the cluster.
 - **nvidia-smi shows no memory numbers**: normal on GB10; watch `free -g`.
