@@ -67,6 +67,22 @@ class DSparkMarkovHead(nn.Module):
         return logits_processor(self.markov_w2, markov_embed)
 
 
+class DSparkConfidenceHead(nn.Module):
+    """Per-position acceptance-probability predictor (linear -> scalar logit).
+
+    Mirrors the speculators trainer's ConfidenceHead: with
+    ``confidence_head_with_markov`` the input is ``[hidden; markov_embed]``,
+    trained against the per-position accept rate ``1 - d_TV``.
+    """
+
+    def __init__(self, input_dim: int) -> None:
+        super().__init__()
+        self.proj = nn.Linear(input_dim, 1)
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.proj(features.to(self.proj.weight.dtype)).squeeze(-1)
+
+
 class Qwen3DSparkModel(DFlashQwen3Model):
     """DFlash Qwen3 backbone + DSpark Markov head."""
 
@@ -90,6 +106,14 @@ class Qwen3DSparkModel(DFlashQwen3Model):
             config.markov_rank,
             prefix=maybe_prefix(prefix, "markov_head"),
         )
+        self.confidence_head: DSparkConfidenceHead | None = None
+        if getattr(config, "enable_confidence_head", False):
+            conf_in = config.hidden_size + (
+                config.markov_rank
+                if getattr(config, "confidence_head_with_markov", False)
+                else 0
+            )
+            self.confidence_head = DSparkConfidenceHead(conf_in)
 
 
 class Qwen3DSparkForCausalLM(DFlashQwen3ForCausalLM):
@@ -143,6 +167,23 @@ class Qwen3DSparkForCausalLM(DFlashQwen3ForCausalLM):
     def markov_embed(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.model.markov_head.embed(token_ids)
 
+    def has_confidence_head(self) -> bool:
+        return self.model.confidence_head is not None
+
+    def confidence_logits(
+        self, hidden_states: torch.Tensor, markov_embed: torch.Tensor
+    ) -> torch.Tensor:
+        """Per-position acceptance logit ([B, hidden], [B, r] -> [B])."""
+        head = self.model.confidence_head
+        assert head is not None
+        if getattr(self.config, "confidence_head_with_markov", False):
+            features = torch.cat(
+                [hidden_states, markov_embed.to(hidden_states.dtype)], dim=-1
+            )
+        else:
+            features = hidden_states
+        return head(features)
+
     def markov_bias(self, markov_embed: torch.Tensor) -> torch.Tensor:
         return self.model.markov_head.bias(markov_embed, self.logits_processor)
 
@@ -170,10 +211,11 @@ class Qwen3DSparkForCausalLM(DFlashQwen3ForCausalLM):
             process_eagle_weight(self, name)
 
         # mask_embedding is an unused placeholder param; DSpark masks via the vocab row.
-        # confidence_head is not wired into inference yet; skip its weights.
         # embed_tokens / lm_head are optional; when omitted they are shared from
         # the target by load_dspark_model, so skip the unloaded params here.
-        skip_substrs = ["mask_embedding", "confidence_head"]
+        skip_substrs = ["mask_embedding"]
+        if self.model.confidence_head is None:
+            skip_substrs.append("confidence_head")
         if not includes_embed_tokens:
             skip_substrs.append("embed_tokens")
         if not includes_lm_head:

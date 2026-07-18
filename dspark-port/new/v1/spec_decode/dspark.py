@@ -31,6 +31,16 @@ from vllm.v1.spec_decode.dflash import DFlashProposer
 logger = init_logger(__name__)
 
 _DSPARK_PROFILE = os.environ.get("VLLM_DSPARK_PROFILE", "0") == "1"
+# Confidence-gated dynamic K: if > 0, truncate each request's proposal at the
+# first draft position whose confidence-head acceptance estimate falls below
+# tau. The runner picks the per-request valid counts up via
+# take_dspark_valid_counts() and trims the scheduled verify slots (the
+# ngram-gpu scheduler-side trim path), saving the per-position verify cost.
+_DSPARK_CONF_TAU = float(os.environ.get("VLLM_DSPARK_CONF_TAU", "0") or "0")
+# Floor on the gated proposal length. min_k=1 avoids the count-0 cliff: a step
+# that proposes nothing degenerates to the ~15 tok/s no-spec floor, which the
+# s19 tau=0.5 run showed dominates any per-position verify savings.
+_DSPARK_CONF_MIN_K = int(os.environ.get("VLLM_DSPARK_CONF_MIN_K", "0") or "0")
 
 
 def _sync_ms(t0: float) -> float:
@@ -52,6 +62,10 @@ class DSparkProposer(DFlashProposer):
         # set_inputs_first_pass. Speculators DSpark uses dspark_bonus_anchor=True
         # (the 1+N DFlash layout), so the bonus token is next_token_ids.
         self._dspark_prev: torch.Tensor | None = None
+        # Lazily resolved on first sample (the draft model isn't loaded yet
+        # here): tau > 0 AND the checkpoint actually has a confidence head.
+        self._dspark_use_conf: bool | None = None
+        self._dspark_valid_counts: torch.Tensor | None = None
         if self._enable_probabilistic_draft_probs:
             logger.warning(
                 "DSpark probabilistic drafting is not implemented; falling back "
@@ -142,6 +156,20 @@ class DSparkProposer(DFlashProposer):
         assert self._dspark_prev is not None
         prev = self._dspark_prev[:num_reqs]  # bonus token per req (target vocab)
 
+        if self._dspark_use_conf is None:
+            self._dspark_use_conf = _DSPARK_CONF_TAU > 0 and getattr(
+                self.model, "has_confidence_head", lambda: False
+            )()
+            if _DSPARK_CONF_TAU > 0:
+                logger.info(
+                    "DSpark confidence gating: tau=%.3f enabled=%s",
+                    _DSPARK_CONF_TAU,
+                    self._dspark_use_conf,
+                )
+        use_conf = self._dspark_use_conf
+        hs_blocks = hidden_states.view(num_reqs, n, -1) if use_conf else None
+        conf_cols: list[torch.Tensor] = []
+
         out = torch.empty(
             (num_reqs, n), dtype=torch.int64, device=hidden_states.device
         )
@@ -149,11 +177,42 @@ class DSparkProposer(DFlashProposer):
             # Sequential stage: bias position i by the previously sampled token.
             markov_embed = self.model.markov_embed(prev)
             bias = self.model.markov_bias(markov_embed)
+            if use_conf:
+                conf_cols.append(
+                    self.model.confidence_logits(hs_blocks[:, i], markov_embed)
+                )
             logits_i = base_logits[:, i] + bias
             # Greedy in draft space, then remap draft->target ids.
             draft_i = self.model.map_draft_to_target(logits_i.argmax(dim=-1))
             out[:, i] = draft_i
             prev = draft_i
+
+        self._dspark_valid_counts = None
+        if use_conf:
+            conf = torch.stack(conf_cols, dim=1).float().sigmoid()  # [reqs, n]
+            # Keep a prefix of positions: truncate at the first one whose
+            # predicted acceptance is below tau (that position included).
+            keep = (conf >= _DSPARK_CONF_TAU).to(torch.int32).cumprod(dim=1)
+            self._dspark_valid_counts = (
+                keep.sum(dim=1).clamp_(min=min(_DSPARK_CONF_MIN_K, n)).to(torch.int32)
+            )
+            # Periodic conf snapshot (cheap: one sync per 500 steps) to guide
+            # the tau sweep without paying the full profile-mode sync cost.
+            self._dspark_conf_step = getattr(self, "_dspark_conf_step", 0) + 1
+            if self._dspark_conf_step % 500 == 1:
+                logger.info(
+                    "DSPARK_CONF step=%d per_pos_mean=%s counts=%s",
+                    self._dspark_conf_step,
+                    [round(x, 3) for x in conf.mean(dim=0).tolist()],
+                    self._dspark_valid_counts.tolist(),
+                )
+            if _DSPARK_PROFILE:
+                logger.info(
+                    "DSPARK_PROF conf mean=%.3f per_pos=%s counts=%s",
+                    conf.mean().item(),
+                    [round(x, 3) for x in conf.mean(dim=0).tolist()],
+                    self._dspark_valid_counts.tolist(),
+                )
 
         if _DSPARK_PROFILE:
             logger.info(
@@ -164,3 +223,14 @@ class DSparkProposer(DFlashProposer):
             )
         # Flatten (req, step) -> matches the caller's .view(-1, n).
         return out.reshape(-1), None
+
+    def take_dspark_valid_counts(self) -> torch.Tensor | None:
+        """Per-request confidence-gated draft counts from the last sample.
+
+        int32 [num_reqs], aligned with the batch order of the proposals; None
+        when gating is off. Consumed once per step by the runner, which trims
+        the scheduled verify slots on the next step.
+        """
+        counts = self._dspark_valid_counts
+        self._dspark_valid_counts = None
+        return counts

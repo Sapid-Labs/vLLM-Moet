@@ -850,14 +850,20 @@ class GPUModelRunner(
         self._draft_token_ids: list[list[int]] | torch.Tensor | None = None
         self._draft_probs: torch.Tensor | None = None
         self._draft_prob_req_ids: list[str] | None = None
+        # DSpark confidence-gated dynamic K reuses the ngram-gpu valid-count
+        # trim machinery (see VLLM_DSPARK_CONF_TAU in v1/spec_decode/dspark.py).
+        self._dspark_dynamic_k = (
+            self.speculative_config is not None
+            and self.speculative_config.method == "dspark"
+            and float(os.environ.get("VLLM_DSPARK_CONF_TAU", "0") or "0") > 0
+        )
         # N-gram GPU path: async D2H buffer/event for per-request valid draft counts.
         self._num_valid_draft_tokens: torch.Tensor | None = None
         self._num_valid_draft_tokens_cpu: torch.Tensor | None = None
         self._num_valid_draft_tokens_event: torch.cuda.Event | None = None
         self._num_valid_draft_tokens_copy_stream: torch.cuda.Stream | None = None
-        if (
-            self.speculative_config is not None
-            and self.speculative_config.use_ngram_gpu()
+        if self.speculative_config is not None and (
+            self.speculative_config.use_ngram_gpu() or self._dspark_dynamic_k
         ):
             self._num_valid_draft_tokens_cpu = torch.empty(
                 self.max_num_reqs, dtype=torch.int32, pin_memory=PIN_MEMORY
@@ -1286,9 +1292,8 @@ class GPUModelRunner(
         # Save scheduler-allocated spec lengths before trimming so
         # prev_num_draft_len keeps the optimistic count for rejection correction.
         original_num_spec_per_req: dict[str, int] = {}
-        if (
-            self.speculative_config is not None
-            and self.speculative_config.use_ngram_gpu()
+        if self.speculative_config is not None and (
+            self.speculative_config.use_ngram_gpu() or self._dspark_dynamic_k
         ):
             for req_id, toks in scheduled_spec_tokens.items():
                 original_num_spec_per_req[req_id] = len(toks)
@@ -4118,9 +4123,8 @@ class GPUModelRunner(
         # If ngram_gpu is used, we need to copy the scheduler_output to avoid
         # the modification has influence on the scheduler_output in engine core process.
         # The replace is much faster than deepcopy.
-        if (
-            self.speculative_config is not None
-            and self.speculative_config.use_ngram_gpu()
+        if self.speculative_config is not None and (
+            self.speculative_config.use_ngram_gpu() or self._dspark_dynamic_k
         ):
             num_scheduled_tokens_copy = scheduler_output.num_scheduled_tokens.copy()
             spec_decode_tokens_copy = (
@@ -5686,6 +5690,23 @@ class GPUModelRunner(
                 if draft_probs is not None:
                     self._draft_probs = draft_probs
                     self._draft_prob_req_ids = self.input_batch.req_ids.copy()
+
+            # DSpark dynamic K: stash the confidence-gated valid counts and
+            # kick off the async D2H copy; _update_states trims the scheduled
+            # verify slots with them on the next step.
+            if self._dspark_dynamic_k and hasattr(
+                self.drafter, "take_dspark_valid_counts"
+            ):
+                counts = self.drafter.take_dspark_valid_counts()
+                if counts is not None:
+                    self._num_valid_draft_tokens = counts
+                    copy_num_valid_draft_tokens(
+                        self._num_valid_draft_tokens_cpu,
+                        self._num_valid_draft_tokens_copy_stream,
+                        self._num_valid_draft_tokens_event,
+                        self._num_valid_draft_tokens,
+                        self.input_batch.num_reqs,
+                    )
 
         return draft_token_ids
 

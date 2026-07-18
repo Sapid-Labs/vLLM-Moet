@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "name": "Sparkulator workstream 0: confidence-gated dynamic K",
+  "status": "active",
+  "created": "2026-07-18T10:57:23-04:00",
+  "focus": {
+    "goal": "Beat the epoch-3 dspark K=3 baseline (24.28 tok/s sparkbench mean) on GLM-5.2 TP2 by wiring the checkpoint's confidence head into the dspark proposer and truncating proposals below a confidence threshold tau, saving ~32 ms/position verify cost on low-acceptance positions.",
+    "working_on": "DONE — verdict NULL, recorded in spark/handoffs/13-s19-dynamic-k-null.md. tau=0: 24.40 (baseline repro); tau=0.5: 18.77; tau=0.5+min_k=1 (best case): 19.76. Structural: dense/attention bytes are per-step, not per-K, so trimming any position loses. epoch-3 K=3 stays champion; resting serve restored. Next decision (user): green-light v4 training, which must win on acceptance lift alone.",
+    "hope": "A standalone +0.5-1.5 tok/s that ships regardless of whether Sparkulator v4 (final-hidden-state conditioning) pans out, and a properly exercised confidence signal that v4 training can build on.",
+    "updated": "2026-07-18T10:57:23-04:00"
+  },
+  "task_lists": [
+    {
+      "id": "workstream-0",
+      "name": "Confidence-gated dynamic K",
+      "tasks": [
+        {
+          "id": "investigate-plumbing",
+          "title": "Investigate confidence head + variable-length proposal support",
+          "owner": "agent",
+          "status": "done",
+          "subtasks": []
+        },
+        {
+          "id": "implement-gating",
+          "title": "Implement confidence gating in dspark proposer + runner trim path, deploy to both venvs",
+          "owner": "agent",
+          "status": "done",
+          "subtasks": []
+        },
+        {
+          "id": "tau-sweep",
+          "title": "Sweep tau on sparkbench at K=3 vs epoch-3 baseline (24.28 tok/s)",
+          "owner": "agent",
+          "status": "in_progress",
+          "subtasks": [
+            {
+              "id": "tau0-baseline",
+              "title": "tau=0 baseline bench: 24.40 tok/s, pos0 0.742 (epoch-3 record 24.28 reproduced; gated code inert)",
+              "owner": "agent",
+              "status": "done",
+              "subtasks": []
+            },
+            {
+              "id": "tau-05",
+              "title": "tau=0.5 bench: 18.77 tok/s — big loss; ~24% of steps proposed 0 drafts (no-spec cliff), all categories down",
+              "owner": "agent",
+              "status": "done",
+              "subtasks": []
+            },
+            {
+              "id": "tau-refined",
+              "title": "Decisive cycle min_k=1 + tau=0.5: 19.76 tok/s — still loses; workstream 0 verdict NULL (structural: per-step dense bytes dominate, trimming never pays)",
+              "owner": "agent",
+              "status": "done",
+              "subtasks": []
+            }
+          ]
+        },
+        {
+          "id": "gsm8k-check",
+          "title": "GSM8K-50 spot check — obsolete (nothing ships; greedy spec decode lossless, no quality surface changed)",
+          "owner": "agent",
+          "status": "done",
+          "subtasks": []
+        },
+        {
+          "id": "commit-handoff",
+          "title": "Commit dspark-port changes + write handoff 13",
+          "owner": "agent",
+          "status": "in_progress",
+          "subtasks": []
+        },
+        {
+          "id": "greenlight-v4",
+          "title": "Decide whether to proceed to Sparkulator v4 training (trainer surgery + GATE A)",
+          "owner": "user",
+          "status": "todo",
+          "subtasks": []
+        }
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "what-to-work-on",
+      "question": "What do you want to work on this session?",
+      "answer": "The current goal: pick up spark/handoffs/12-sparkulator-v4-design.md and get started, i.e. workstream 0 (confidence-gated dynamic K) first.",
+      "asked": "2026-07-18T10:57:23-04:00"
+    }
+  ],
+  "features": {},
+  "workflows": [],
+  "data": []
+}

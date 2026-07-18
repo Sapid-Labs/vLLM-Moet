@@ -45,6 +45,15 @@ Keep everything that is proven; change only the conditioning.
 
 ## 3. Workstream 0 (do first, no training): confidence-gated dynamic K
 
+> **VERDICT (s19, 2026-07-18): NULL — built, measured, loses.** τ=0.5 →
+> 18.77 tok/s; best case (min_k=1, deep positions only) → 19.76 vs 24.40
+> baseline (same-session A/B ×3, `handoffs/13-s19-dynamic-k-null.md`). Cause is
+> structural: dense/attention bytes (~74%/step) are paid per step regardless of
+> K, so a marginal verify position costs far less than the assumed 32 ms and
+> even ~0.4-acceptance positions are profitable to keep. Consequently §2's
+> "dynamic-K monetizes pos-0-only gains" fallback is dead and GATE C drops its
+> dynamic-K τ sweep. The τ/min_k code stays in the venvs, inert at τ=0.
+
 Proposer-side change in `v1/spec_decode/dspark.py` (`_sample_draft_tokens`): after
 sampling position i, read the confidence head; if conf < τ, emit fewer than K
 drafts this step (vLLM supports variable per-step proposal lengths — verify this;

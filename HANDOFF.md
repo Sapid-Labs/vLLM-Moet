@@ -5,12 +5,13 @@ in order for the full journey. This root file is only a pointer: current status,
 latest handoff, index. Update it (pointer + index line) in the same commit as each
 new numbered handoff.
 
-## CURRENT STATUS → `spark/handoffs/12-sparkulator-v4-design.md`
+## CURRENT STATUS → `spark/handoffs/13-s19-dynamic-k-null.md`
 
-One line: best = dspark K=3 ≈ 24.3 tok/s serving on :8000; **Sparkulator v4
-designed, not started** (`spark/SPARKULATOR-DESIGN.md`: final-hidden-state
-conditioning — the MTP-vs-dspark gap — projected 26–28; workstream 0 =
-confidence-gated dynamic K, no training). Keep the worker hs caches (training set).
+One line: best = dspark K=3 ≈ 24.3 tok/s serving on :8000; **workstream 0
+(confidence-gated dynamic K) measured NULL s19** — trimming any position loses
+~4–6 tok/s on this bandwidth-bound stack (dense bytes paid per step, not per K);
+v4 (`spark/SPARKULATOR-DESIGN.md`) must win on acceptance lift alone, dynamic-K
+fallback is dead. v4 training not started. Keep the worker hs caches (training set).
 
 ## JOURNEY INDEX (chronological)
 
@@ -28,6 +29,7 @@ confidence-gated dynamic K, no training). Keep the worker hs caches (training se
 | `spark/handoffs/10-s18-regression-resolved-sparkulator-v3-null.md` | s18: regression resolved; sparkbench protocol; Sparkulator v3 NULL; epoch-3 at ceiling |
 | `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md` | s18 overnight: K=3 new best 24.3; siro1 A/B loses; site rows + GSM8K-50 |
 | `spark/handoffs/12-sparkulator-v4-design.md` | Sparkulator v4 design (final-state conditioning + dynamic K) — not started |
+| `spark/handoffs/13-s19-dynamic-k-null.md` | s19: workstream 0 (dynamic K) built + measured NULL; per-position verify cost is small, trimming loses; v4 = acceptance lift only |
 
 Sub-project logs: `spark/dspark-distill/` (HANDOFF.md, PLAN.md, FINDINGS.md, tools/).
 Deep reference docs: `spark/NVFP4-DENSE.md`, `spark/GOAL.md`, `spark/RUNBOOK.md`,

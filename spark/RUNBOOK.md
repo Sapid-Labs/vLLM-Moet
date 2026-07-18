@@ -192,6 +192,9 @@ DSPARK_K=3 MODEL=$M/nvfp4_big3_overlay \
   ~/Dev/vLLM-Moet/spark/serve-glm52-tp2-dspark.sh --hf-overrides '{"num_experts_per_tok":4}'
 ```
 
+Optional knobs `VLLM_DSPARK_CONF_TAU` / `VLLM_DSPARK_CONF_MIN_K` (confidence-gated
+dynamic K, s19): measured NULL — τ=0.5 loses ~5 tok/s, leave unset (=0/off);
+see `handoffs/13-s19-dynamic-k-null.md`.
 Native-MTP flavor: same env with `MTP_K=1 serve-glm52-tp2-mtp.sh`. First ~10
 runs after boot are SLOW (2→22 tok/s): the serve script purges page cache and
 the mmap'd planes fault back in — never benchmark cold (the session-13 "dspark
