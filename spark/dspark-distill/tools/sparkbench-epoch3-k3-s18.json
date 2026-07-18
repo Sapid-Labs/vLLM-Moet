@@ -1,0 +1,611 @@
+{
+  "label": "epoch3-k3",
+  "overall": {
+    "decode_tok_s_mean": 24.28,
+    "pos0_mean": 0.739,
+    "pos1_mean": 0.521,
+    "tok_per_verify_mean": 2.618,
+    "n_prompts": 52
+  },
+  "by_category": {
+    "chat_open": {
+      "n": 4,
+      "decode_tok_s": 21.12,
+      "pos0": 0.641,
+      "pos1": 0.401,
+      "tok_per_verify": 2.265
+    },
+    "code_explain": {
+      "n": 4,
+      "decode_tok_s": 21.25,
+      "pos0": 0.665,
+      "pos1": 0.38,
+      "tok_per_verify": 2.268
+    },
+    "code_gen": {
+      "n": 4,
+      "decode_tok_s": 23.41,
+      "pos0": 0.715,
+      "pos1": 0.478,
+      "tok_per_verify": 2.516
+    },
+    "creative_writing": {
+      "n": 4,
+      "decode_tok_s": 21.98,
+      "pos0": 0.671,
+      "pos1": 0.42,
+      "tok_per_verify": 2.308
+    },
+    "factual_short": {
+      "n": 4,
+      "decode_tok_s": 24.71,
+      "pos0": 0.769,
+      "pos1": 0.528,
+      "tok_per_verify": 2.652
+    },
+    "heldout_reasoning": {
+      "n": 12,
+      "decode_tok_s": 24.96,
+      "pos0": 0.751,
+      "pos1": 0.545,
+      "tok_per_verify": 2.67
+    },
+    "logic_reasoning": {
+      "n": 4,
+      "decode_tok_s": 26.06,
+      "pos0": 0.756,
+      "pos1": 0.581,
+      "tok_per_verify": 2.798
+    },
+    "math_derivation": {
+      "n": 4,
+      "decode_tok_s": 27.29,
+      "pos0": 0.864,
+      "pos1": 0.716,
+      "tok_per_verify": 3.165
+    },
+    "science_derivation": {
+      "n": 4,
+      "decode_tok_s": 24.18,
+      "pos0": 0.751,
+      "pos1": 0.523,
+      "tok_per_verify": 2.602
+    },
+    "structured_output": {
+      "n": 4,
+      "decode_tok_s": 27.05,
+      "pos0": 0.812,
+      "pos1": 0.63,
+      "tok_per_verify": 2.926
+    },
+    "summarize_rewrite": {
+      "n": 4,
+      "decode_tok_s": 23.66,
+      "pos0": 0.716,
+      "pos1": 0.484,
+      "tok_per_verify": 2.523
+    }
+  },
+  "rows": [
+    {
+      "category": "code_gen",
+      "prompt": "Write a Python function that merges two sorted linked lists into one sorted list.",
+      "tokens": 300,
+      "decode_tok_s": 26.16,
+      "tok_per_verify": 2.794,
+      "pos0": 0.794,
+      "pos1": 0.57,
+      "pos2": 0.43
+    },
+    {
+      "category": "code_gen",
+      "prompt": "Implement a debounce decorator in Python with a configurable delay.",
+      "tokens": 300,
+      "decode_tok_s": 19.01,
+      "tok_per_verify": 2.034,
+      "pos0": 0.612,
+      "pos1": 0.32,
+      "pos2": 0.102
+    },
+    {
+      "category": "code_gen",
+      "prompt": "Write a SQL query to find the second-highest salary in an employees table.",
+      "tokens": 300,
+      "decode_tok_s": 23.5,
+      "tok_per_verify": 2.492,
+      "pos0": 0.683,
+      "pos1": 0.483,
+      "pos2": 0.325
+    },
+    {
+      "category": "code_gen",
+      "prompt": "Write a Rust function that returns the nth Fibonacci number iteratively.",
+      "tokens": 300,
+      "decode_tok_s": 24.98,
+      "tok_per_verify": 2.743,
+      "pos0": 0.771,
+      "pos1": 0.541,
+      "pos2": 0.431
+    },
+    {
+      "category": "code_explain",
+      "prompt": "Explain what this does: `df.groupby('k')['v'].transform(lambda x: x - x.mean())`.",
+      "tokens": 300,
+      "decode_tok_s": 22.75,
+      "tok_per_verify": 2.447,
+      "pos0": 0.732,
+      "pos1": 0.455,
+      "pos2": 0.26
+    },
+    {
+      "category": "code_explain",
+      "prompt": "Explain the difference between `git rebase` and `git merge` and when to use each.",
+      "tokens": 300,
+      "decode_tok_s": 18.49,
+      "tok_per_verify": 1.967,
+      "pos0": 0.592,
+      "pos1": 0.25,
+      "pos2": 0.125
+    },
+    {
+      "category": "code_explain",
+      "prompt": "Walk through how a Bloom filter works and its false-positive tradeoff.",
+      "tokens": 300,
+      "decode_tok_s": 19.26,
+      "tok_per_verify": 2.048,
+      "pos0": 0.596,
+      "pos1": 0.301,
+      "pos2": 0.151
+    },
+    {
+      "category": "code_explain",
+      "prompt": "Explain Python's GIL and how it affects multithreaded CPU-bound code.",
+      "tokens": 300,
+      "decode_tok_s": 24.48,
+      "tok_per_verify": 2.609,
+      "pos0": 0.739,
+      "pos1": 0.513,
+      "pos2": 0.357
+    },
+    {
+      "category": "math_derivation",
+      "prompt": "Derive the quadratic formula from ax^2 + bx + c = 0 by completing the square.",
+      "tokens": 300,
+      "decode_tok_s": 25.56,
+      "tok_per_verify": 3.158,
+      "pos0": 0.832,
+      "pos1": 0.726,
+      "pos2": 0.6
+    },
+    {
+      "category": "math_derivation",
+      "prompt": "Compute the derivative of f(x) = x^3 ln(x) and show each step.",
+      "tokens": 300,
+      "decode_tok_s": 28.77,
+      "tok_per_verify": 3.409,
+      "pos0": 0.955,
+      "pos1": 0.761,
+      "pos2": 0.693
+    },
+    {
+      "category": "math_derivation",
+      "prompt": "A fair coin is flipped 10 times. What is the probability of exactly 6 heads? Show work.",
+      "tokens": 300,
+      "decode_tok_s": 28.82,
+      "tok_per_verify": 3.247,
+      "pos0": 0.849,
+      "pos1": 0.785,
+      "pos2": 0.613
+    },
+    {
+      "category": "math_derivation",
+      "prompt": "Solve the recurrence T(n) = 2T(n/2) + n using the master theorem, with steps.",
+      "tokens": 300,
+      "decode_tok_s": 26.0,
+      "tok_per_verify": 2.848,
+      "pos0": 0.819,
+      "pos1": 0.59,
+      "pos2": 0.438
+    },
+    {
+      "category": "science_derivation",
+      "prompt": "Derive the equation for the period of a simple pendulum from first principles.",
+      "tokens": 300,
+      "decode_tok_s": 23.63,
+      "tok_per_verify": 2.578,
+      "pos0": 0.716,
+      "pos1": 0.534,
+      "pos2": 0.328
+    },
+    {
+      "category": "science_derivation",
+      "prompt": "Explain why the sky is blue in terms of Rayleigh scattering, step by step.",
+      "tokens": 300,
+      "decode_tok_s": 25.98,
+      "tok_per_verify": 2.778,
+      "pos0": 0.778,
+      "pos1": 0.593,
+      "pos2": 0.407
+    },
+    {
+      "category": "science_derivation",
+      "prompt": "Balance this reaction and explain: C3H8 + O2 -> CO2 + H2O.",
+      "tokens": 300,
+      "decode_tok_s": 25.47,
+      "tok_per_verify": 2.761,
+      "pos0": 0.807,
+      "pos1": 0.56,
+      "pos2": 0.394
+    },
+    {
+      "category": "science_derivation",
+      "prompt": "Explain how a transistor amplifies a signal, at the level of electrons.",
+      "tokens": 300,
+      "decode_tok_s": 21.66,
+      "tok_per_verify": 2.29,
+      "pos0": 0.702,
+      "pos1": 0.405,
+      "pos2": 0.183
+    },
+    {
+      "category": "logic_reasoning",
+      "prompt": "Three switches control one bulb in another room; you may enter once. How do you find which switch?",
+      "tokens": 300,
+      "decode_tok_s": 24.93,
+      "tok_per_verify": 2.67,
+      "pos0": 0.741,
+      "pos1": 0.545,
+      "pos2": 0.384
+    },
+    {
+      "category": "logic_reasoning",
+      "prompt": "If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops Lazzies? Explain.",
+      "tokens": 300,
+      "decode_tok_s": 27.32,
+      "tok_per_verify": 2.932,
+      "pos0": 0.786,
+      "pos1": 0.631,
+      "pos2": 0.515
+    },
+    {
+      "category": "logic_reasoning",
+      "prompt": "You have 8 balls, one heavier. With a balance scale and 2 weighings, find it. Explain.",
+      "tokens": 300,
+      "decode_tok_s": 22.97,
+      "tok_per_verify": 2.475,
+      "pos0": 0.664,
+      "pos1": 0.459,
+      "pos2": 0.352
+    },
+    {
+      "category": "logic_reasoning",
+      "prompt": "A bat and ball cost $1.10; the bat costs $1 more than the ball. How much is the ball? Explain.",
+      "tokens": 300,
+      "decode_tok_s": 29.01,
+      "tok_per_verify": 3.115,
+      "pos0": 0.833,
+      "pos1": 0.688,
+      "pos2": 0.594
+    },
+    {
+      "category": "factual_short",
+      "prompt": "What is the capital of Australia?",
+      "tokens": 300,
+      "decode_tok_s": 24.84,
+      "tok_per_verify": 2.721,
+      "pos0": 0.766,
+      "pos1": 0.523,
+      "pos2": 0.432
+    },
+    {
+      "category": "factual_short",
+      "prompt": "Who wrote the novel 'Pride and Prejudice'?",
+      "tokens": 167,
+      "decode_tok_s": 25.74,
+      "tok_per_verify": 2.721,
+      "pos0": 0.836,
+      "pos1": 0.508,
+      "pos2": 0.377
+    },
+    {
+      "category": "factual_short",
+      "prompt": "What year did the Berlin Wall fall?",
+      "tokens": 300,
+      "decode_tok_s": 23.86,
+      "tok_per_verify": 2.559,
+      "pos0": 0.737,
+      "pos1": 0.525,
+      "pos2": 0.297
+    },
+    {
+      "category": "factual_short",
+      "prompt": "What is the chemical symbol for gold?",
+      "tokens": 287,
+      "decode_tok_s": 24.42,
+      "tok_per_verify": 2.609,
+      "pos0": 0.736,
+      "pos1": 0.555,
+      "pos2": 0.318
+    },
+    {
+      "category": "creative_writing",
+      "prompt": "Write the opening paragraph of a mystery novel set on a rainy night.",
+      "tokens": 300,
+      "decode_tok_s": 21.75,
+      "tok_per_verify": 2.282,
+      "pos0": 0.649,
+      "pos1": 0.382,
+      "pos2": 0.252
+    },
+    {
+      "category": "creative_writing",
+      "prompt": "Write a short poem about the ocean at dawn.",
+      "tokens": 300,
+      "decode_tok_s": 24.64,
+      "tok_per_verify": 2.564,
+      "pos0": 0.684,
+      "pos1": 0.624,
+      "pos2": 0.256
+    },
+    {
+      "category": "creative_writing",
+      "prompt": "Invent a dialogue between a robot and a cat who just met.",
+      "tokens": 300,
+      "decode_tok_s": 21.51,
+      "tok_per_verify": 2.282,
+      "pos0": 0.725,
+      "pos1": 0.344,
+      "pos2": 0.214
+    },
+    {
+      "category": "creative_writing",
+      "prompt": "Describe a bustling alien marketplace in vivid sensory detail.",
+      "tokens": 300,
+      "decode_tok_s": 20.02,
+      "tok_per_verify": 2.106,
+      "pos0": 0.627,
+      "pos1": 0.331,
+      "pos2": 0.148
+    },
+    {
+      "category": "summarize_rewrite",
+      "prompt": "Summarize the plot of Romeo and Juliet in three sentences.",
+      "tokens": 300,
+      "decode_tok_s": 22.1,
+      "tok_per_verify": 2.378,
+      "pos0": 0.63,
+      "pos1": 0.457,
+      "pos2": 0.291
+    },
+    {
+      "category": "summarize_rewrite",
+      "prompt": "Rewrite this formally: 'hey can u send me the thing when u get a sec thx'.",
+      "tokens": 300,
+      "decode_tok_s": 24.91,
+      "tok_per_verify": 2.646,
+      "pos0": 0.761,
+      "pos1": 0.54,
+      "pos2": 0.345
+    },
+    {
+      "category": "summarize_rewrite",
+      "prompt": "Explain photosynthesis to a five-year-old.",
+      "tokens": 300,
+      "decode_tok_s": 26.48,
+      "tok_per_verify": 2.804,
+      "pos0": 0.804,
+      "pos1": 0.561,
+      "pos2": 0.439
+    },
+    {
+      "category": "summarize_rewrite",
+      "prompt": "Condense the causes of World War I into a short bulleted list.",
+      "tokens": 300,
+      "decode_tok_s": 21.13,
+      "tok_per_verify": 2.265,
+      "pos0": 0.667,
+      "pos1": 0.379,
+      "pos2": 0.22
+    },
+    {
+      "category": "structured_output",
+      "prompt": "Return a JSON object describing a book with title, author, year, and genres (array).",
+      "tokens": 300,
+      "decode_tok_s": 24.63,
+      "tok_per_verify": 2.649,
+      "pos0": 0.746,
+      "pos1": 0.561,
+      "pos2": 0.342
+    },
+    {
+      "category": "structured_output",
+      "prompt": "Make a markdown table comparing REST and GraphQL across 4 dimensions.",
+      "tokens": 300,
+      "decode_tok_s": 26.03,
+      "tok_per_verify": 2.822,
+      "pos0": 0.794,
+      "pos1": 0.607,
+      "pos2": 0.421
+    },
+    {
+      "category": "structured_output",
+      "prompt": "List the first 10 prime numbers, comma-separated, nothing else.",
+      "tokens": 300,
+      "decode_tok_s": 32.32,
+      "tok_per_verify": 3.529,
+      "pos0": 0.988,
+      "pos1": 0.812,
+      "pos2": 0.729
+    },
+    {
+      "category": "structured_output",
+      "prompt": "Output a YAML config for a web server with port, host, and 3 routes.",
+      "tokens": 300,
+      "decode_tok_s": 25.23,
+      "tok_per_verify": 2.703,
+      "pos0": 0.721,
+      "pos1": 0.541,
+      "pos2": 0.441
+    },
+    {
+      "category": "chat_open",
+      "prompt": "I'm feeling overwhelmed at work lately. Any advice?",
+      "tokens": 300,
+      "decode_tok_s": 21.17,
+      "tok_per_verify": 2.265,
+      "pos0": 0.629,
+      "pos1": 0.394,
+      "pos2": 0.242
+    },
+    {
+      "category": "chat_open",
+      "prompt": "What's a good weekend project for someone learning electronics?",
+      "tokens": 300,
+      "decode_tok_s": 20.21,
+      "tok_per_verify": 2.188,
+      "pos0": 0.601,
+      "pos1": 0.362,
+      "pos2": 0.225
+    },
+    {
+      "category": "chat_open",
+      "prompt": "Recommend three sci-fi books and say why in one line each.",
+      "tokens": 300,
+      "decode_tok_s": 22.66,
+      "tok_per_verify": 2.439,
+      "pos0": 0.74,
+      "pos1": 0.463,
+      "pos2": 0.236
+    },
+    {
+      "category": "chat_open",
+      "prompt": "How do you stay motivated when learning something hard?",
+      "tokens": 300,
+      "decode_tok_s": 20.46,
+      "tok_per_verify": 2.167,
+      "pos0": 0.594,
+      "pos1": 0.384,
+      "pos2": 0.188
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "What are some key takeaways from the research conducted on the benefits of consuming plant-based foods? According to the findings listed on this <a href=\"https://www.example.com/plant-based-study.html\">HTML page</a>, incorporating fruits, vegetables, and whole grains into one's diet can lead to improvements in blood pressure and cholesterol levels. Additionally, plant-based foods require fewer resources to produce compared to animal-based foods, and the latter contributes to greenhouse gas emissions and deforestation. How can these findings be translated into actionable steps towards promoting public health and environmental sustainability?",
+      "tokens": 300,
+      "decode_tok_s": 22.03,
+      "tok_per_verify": 2.344,
+      "pos0": 0.664,
+      "pos1": 0.414,
+      "pos2": 0.266
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "I have a User model with attributes :id, :first_name, :last_name, and :email. I want to display specific attributes of a specific user, such as :id and :first_name. I know how to select specific values for a list of users, but I'm not sure how to select specific attributes for a single user. I found a solution using User.find_by(id: 5).select(:id, :first_name), but it returns a hash instead of an active record instance. Is there a way to get an active record instance with only the specific attributes?",
+      "tokens": 300,
+      "decode_tok_s": 25.28,
+      "tok_per_verify": 2.694,
+      "pos0": 0.757,
+      "pos1": 0.532,
+      "pos2": 0.405
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "Verify the accuracy of the data.\nThe 16th President of the United States was Abraham Lincoln.",
+      "tokens": 300,
+      "decode_tok_s": 20.33,
+      "tok_per_verify": 2.158,
+      "pos0": 0.626,
+      "pos1": 0.345,
+      "pos2": 0.187
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "How can I create a JavaScript function that compares two strings and returns an array of the differences?",
+      "tokens": 300,
+      "decode_tok_s": 23.59,
+      "tok_per_verify": 2.521,
+      "pos0": 0.706,
+      "pos1": 0.496,
+      "pos2": 0.319
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "How can I dynamically update data in Flask without reloading the page? I'm trying to create something like Google Suggest Tool and I'm listening to input changes and sending data via GET method. However, when I try to print the data dynamically in HTML using Jinja, the variable doesn't update dynamically and prints an empty list. Here's the code I'm using:\n\nFor sending data using GET method:\n```\n$(\"#search_form_input\").keyup(function(){\n    var some_var = $(this).val();\n    $.ajax({\n        url: \"\",\n        type: \"get\",\n        data:{jsdata: some_var},\n        success: function(response) {\n\n        },\n        error: function(xhr) {\n            //Handle error\n        }\n    });\n});\n```\n\nFor handling data and sending it to Google API:\n```\n@app.route('/', methods=['GET', 'POST'])\ndef start_page_data():\n    query_for_suggest = request.args.get('jsdata')\n\n    if query_for_suggest == None:\n        suggestions_list = ['',]\n        pass\n    else:\n        suggestions_list = []\n        r = requests.get('http://suggestqueries.google.com/complete/search?output=toolbar&hl=ru&q={}&gl=in'.format(query_for_suggest), 'lxml')\n        soup = BeautifulSoup(r.content)\n        suggestions = soup.find_all('suggestion')\n        for suggestion in suggestions:\n            suggestions_list.append(suggestion.attrs['data'])\n        print(suggestions_list)\n    return render_template('start_page.html', suggestions_list=suggestions_list)\n```\n\nFor printing data dynamically in HTML using Jinja:\n```\n<label id=\"value_lable\">\n    {% for suggestion in suggestions_list %}\n       {{ suggestion }}\n    {% endfor %}\n</label>\n```",
+      "tokens": 300,
+      "decode_tok_s": 22.77,
+      "tok_per_verify": 2.419,
+      "pos0": 0.694,
+      "pos1": 0.468,
+      "pos2": 0.258
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "In Python, I have a single digit number assigned to a variable, for instance a = 5. How can I convert this single digit number into a double digits string? In other words, how can I print it as a string '05'?",
+      "tokens": 300,
+      "decode_tok_s": 26.87,
+      "tok_per_verify": 2.885,
+      "pos0": 0.788,
+      "pos1": 0.635,
+      "pos2": 0.462
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "I have a 2D (x,y) time series input of a dot moving on a screen for a tracker software. It has some noise that I want to remove using the Kalman filter. I've looked into the scipy cookbook but only found a 1D example. I'm aware that there's an implementation for the Kalman filter in OpenCV, but I've had difficulty finding code examples. Can anyone provide Python code for a 2D Kalman filter?",
+      "tokens": 300,
+      "decode_tok_s": 25.25,
+      "tok_per_verify": 2.694,
+      "pos0": 0.748,
+      "pos1": 0.595,
+      "pos2": 0.351
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "According to the gcc docs on extended assembler, it states that read-write operands should only be used when the constraints for the operand allow a register. However, I have seen it being done a number of times, and Linus Torvalds even mentioned that the gcc docs are not updated, correct, or reflective of reality. I am hesitant to use +m for an output if it will potentially cause issues with my code. How can I determine if I can rely on this working correctly, or are there alternative options that I should consider?",
+      "tokens": 300,
+      "decode_tok_s": 23.35,
+      "tok_per_verify": 2.513,
+      "pos0": 0.731,
+      "pos1": 0.496,
+      "pos2": 0.286
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "Consider a group G of order 32. If the number of elements of G of order 2 or 4 is even, then prove that G is isomorphic to one of the six non-abelian groups of order 32. If the number of elements of G of order 2 or 4 is odd, then prove that G is isomorphic to either the cyclic group C32 or the dihedral group D16.",
+      "tokens": 300,
+      "decode_tok_s": 26.62,
+      "tok_per_verify": 2.848,
+      "pos0": 0.819,
+      "pos1": 0.6,
+      "pos2": 0.429
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "I am trying to round long float numbers like 32.268907563, 32.268907563, 31.2396694215, 33.6206896552, etc. to the nearest integer. I've tried using `math.ceil(x)`, `math.floor(x)`, and `round(x)`, but none of these methods are working as they still result in float numbers. I have a piece of code where I am trying to implement this. Can someone suggest a suitable solution?\n\nCode:\n\n```\nfor i in widthRange:\n    for j in heightRange:\n        r, g, b = rgb_im.getpixel((i, j))\n        h, s, v = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)\n        h = h * 360\n        int(round(h))\n        print(h)\n```",
+      "tokens": 300,
+      "decode_tok_s": 27.89,
+      "tok_per_verify": 2.99,
+      "pos0": 0.86,
+      "pos1": 0.65,
+      "pos2": 0.48
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "In what ways can mental health be considered as an essential component of overall well-being, and what are some APA-cited resources that can provide credible support for this argument? To supplement your persuasive essay emphasizing the significance of prioritizing mental health, the following JSON-formatted sources can be utilized, and a properly formatted APA citation must be provided for each: \n\\begin{enumerate}\n    \\item \\textbf{Source 1:} \\\\\n    Lloyd, C., \\& Wallerstein, N. (2018). The role of mental health in achieving health equity. \\textit{American Journal of Public Health}, 108(3), 306-312.\n    \n    \\item \\textbf{Source 2:} \\\\\n    Burgess, R. A., \\& Wood, J. L. (2015). Integrating mental health and wellbeing into population health strategies. \\textit{Public Health Reviews}, 36(1), 1-18.\n    \n    \\item \\textbf{Source 3:} \\\\\n    World Health Organization. (2014). Mental health: A state of well-being. Geneva, Switzerland: World Health Organization.\n\\end{enumerate}",
+      "tokens": 300,
+      "decode_tok_s": 27.58,
+      "tok_per_verify": 2.98,
+      "pos0": 0.812,
+      "pos1": 0.663,
+      "pos2": 0.505
+    },
+    {
+      "category": "heldout_reasoning",
+      "prompt": "If a drip of water is equivalent to $\\frac{1}{4}$ of a milliliter, how many drips are in a liter of water? Note: 1 liter = 1000 milliliters.",
+      "tokens": 300,
+      "decode_tok_s": 27.97,
+      "tok_per_verify": 2.99,
+      "pos0": 0.81,
+      "pos1": 0.65,
+      "pos2": 0.53
+    }
+  ]
+}

@@ -5,13 +5,12 @@ in order for the full journey. This root file is only a pointer: current status,
 latest handoff, index. Update it (pointer + index line) in the same commit as each
 new numbered handoff.
 
-## CURRENT STATUS → `spark/handoffs/10-s18-regression-resolved-sparkulator-v3-null.md`
+## CURRENT STATUS → `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md`
 
-One line: s17 "regression" was environmental (protocol banked: fresh cluster, warm
-≥8, same-session A/B via `spark/dspark-distill/tools/sparkbench.py`); Sparkulator
-v3 fine-tune = NULL (third round — weak band is intrinsic entropy, epoch-3 at
-ceiling); ship config (dspark K=2 + REAP + NVFP4 big-3 + top-k4, ~23 tok/s)
-serving on :8000; overnight queue = harness site rows + GSM8K-50 + K=3 re-sweep.
+One line: **new best = dspark K=3 ≈ 24.3 tok/s** (s14 K-verdict flipped; RUNBOOK
+§4b updated, serving on :8000); siro1's external draft loses to epoch-3 (fourth
+challenger down); site harness rows published; GSM8K-50 92%; next idea =
+confidence-gated dynamic K.
 
 ## JOURNEY INDEX (chronological)
 
@@ -27,6 +26,7 @@ serving on :8000; overnight queue = harness site rows + GSM8K-50 + K=3 re-sweep.
 | `spark/handoffs/09-s15s16-dspark-distill.md` | s15-16: self-distill pipeline built; v1+v2 NULL (detail: `spark/dspark-distill/HANDOFF.md`) |
 | `spark/handoffs/04-decode-throughput-regression.md` | s17: 10.4 tok/s regression investigation → s18 RESOLUTION (environmental) |
 | `spark/handoffs/10-s18-regression-resolved-sparkulator-v3-null.md` | s18: regression resolved; sparkbench protocol; Sparkulator v3 NULL; epoch-3 at ceiling |
+| `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md` | s18 overnight: K=3 new best 24.3; siro1 A/B loses; site rows + GSM8K-50 |
 
 Sub-project logs: `spark/dspark-distill/` (HANDOFF.md, PLAN.md, FINDINGS.md, tools/).
 Deep reference docs: `spark/NVFP4-DENSE.md`, `spark/GOAL.md`, `spark/RUNBOOK.md`,

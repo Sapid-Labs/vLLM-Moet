@@ -170,20 +170,22 @@ sanity: measure with `usage.completion_tokens` differentials (512 vs 1024),
 never by counting stream chunks — MTP bundles tokens per chunk. Or just run
 `spark/demo.py`, which does it right.
 
-### 4b. Fast build (~21-22 tok/s): NVFP4 big-3 + REAP planes + top-k4 + dspark K=2
+### 4b. Fast build (~23-24 tok/s): NVFP4 big-3 + REAP planes + top-k4 + dspark K=3
 
-Best measured single-stream config (2026-07-16, session 14 — full 3-way and
-acceptance ablation in `spark/handoffs/03-dspark-acceptance-ablation.md`):
-dspark K=2 ≈ 21.8 tok/s; native MTP K=1 on the same stack ≈ 21 (tie); no-draft
-floor 15.6. Needs the dspark venv port applied on BOTH nodes
-(`dspark-port/apply.sh`) and the speculator at `~/models/hf/GLM-5.2-speculator.dspark`
-on both nodes.
+Best measured single-stream config (2026-07-18, session 18 overnight — sparkbench
+52-prompt mean 24.28 tok/s at K=3 vs 23.15 at K=2; the s14 "K=3 loses" verdict
+flipped with higher measured acceptance, records in
+`spark/dspark-distill/tools/sparkbench-*-s18.json`; earlier 3-way in
+`spark/handoffs/03-dspark-acceptance-ablation.md`): no-draft floor ~14-15.6.
+GSM8K-50 = 92% strict on this stack (draft is lossless at greedy; K only moves
+speed). Needs the dspark venv port applied on BOTH nodes (`dspark-port/apply.sh`)
+and the speculator at `~/models/hf/GLM-5.2-speculator.dspark` on both nodes.
 
 ```bash
 # on the head node (.1):
 ~/Dev/vLLM-Moet/spark/start-ray-cluster.sh
 M=$HOME/models/hf/GLM-5.2-FP8
-DSPARK_K=2 MODEL=$M/nvfp4_big3_overlay \
+DSPARK_K=3 MODEL=$M/nvfp4_big3_overlay \
   VLLM_MOE_W2_PREPACKED_DIR=$M/moe_w2_planes_tp2_p208_reap \
   VLLM_NVFP4_DENSE=1 VLLM_NVFP4_TARGETS=o_proj,q_b_proj,kv_b_proj \
   VLLM_ENGINE_READY_TIMEOUT_S=2400 VLLM_MOE_W2_FADVISE_GLOB= \
