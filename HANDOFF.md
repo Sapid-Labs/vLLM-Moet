@@ -5,12 +5,12 @@ in order for the full journey. This root file is only a pointer: current status,
 latest handoff, index. Update it (pointer + index line) in the same commit as each
 new numbered handoff.
 
-## CURRENT STATUS → `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md`
+## CURRENT STATUS → `spark/handoffs/12-sparkulator-v4-design.md`
 
-One line: **new best = dspark K=3 ≈ 24.3 tok/s** (s14 K-verdict flipped; RUNBOOK
-§4b updated, serving on :8000); siro1's external draft loses to epoch-3 (fourth
-challenger down); site harness rows published; GSM8K-50 92%; next idea =
-confidence-gated dynamic K.
+One line: best = dspark K=3 ≈ 24.3 tok/s serving on :8000; **Sparkulator v4
+designed, not started** (`spark/SPARKULATOR-DESIGN.md`: final-hidden-state
+conditioning — the MTP-vs-dspark gap — projected 26–28; workstream 0 =
+confidence-gated dynamic K, no training). Keep the worker hs caches (training set).
 
 ## JOURNEY INDEX (chronological)
 
@@ -27,6 +27,7 @@ confidence-gated dynamic K.
 | `spark/handoffs/04-decode-throughput-regression.md` | s17: 10.4 tok/s regression investigation → s18 RESOLUTION (environmental) |
 | `spark/handoffs/10-s18-regression-resolved-sparkulator-v3-null.md` | s18: regression resolved; sparkbench protocol; Sparkulator v3 NULL; epoch-3 at ceiling |
 | `spark/handoffs/11-s18-overnight-k3-win-siro1-ab-site-rows.md` | s18 overnight: K=3 new best 24.3; siro1 A/B loses; site rows + GSM8K-50 |
+| `spark/handoffs/12-sparkulator-v4-design.md` | Sparkulator v4 design (final-state conditioning + dynamic K) — not started |
 
 Sub-project logs: `spark/dspark-distill/` (HANDOFF.md, PLAN.md, FINDINGS.md, tools/).
 Deep reference docs: `spark/NVFP4-DENSE.md`, `spark/GOAL.md`, `spark/RUNBOOK.md`,
