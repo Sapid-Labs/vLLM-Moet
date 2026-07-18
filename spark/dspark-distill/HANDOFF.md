@@ -4,7 +4,36 @@ Resume-here pointer for the dspark draft fine-tune. Deep docs alongside:
 `PLAN.md` (design + decisions), `FINDINGS.md` (full investigation + rule-outs).
 Convention: `~/CLAUDE.md` → "Session handoffs".
 
-## STATUS (2026-07-17, session 18) — EFFORT REOPENED: Sparkulator v3 (Joe's call — goal: BEAT epoch-3 on overall sparkbench mean). Phase 1 (weak-band gen) RUNNING.
+## STATUS (2026-07-17 late, session 18) — v3 VERDICT: NULL (third round). Weak-band content has NO learnable signal even in trainer space. Phase 5 NOT auto-triggered (its condition didn't occur) — awaiting Joe's call.
+
+Round 3 ran end-to-end in one day (phases 0-4 below all DONE). Results:
+- **Live back-to-back A/B on frozen sparkbench (same evening, clean-restart protocol,
+  warm 8):** epoch-3 **23.15 tok/s, pos-0 0.748, tok/verify 2.28** vs v3 **22.70,
+  0.732, 2.241** → v3 is a small consistent LOSS. (epoch-3 reproduces across boots:
+  0.743 morning / 0.748 evening — the protocol works; per-category numbers on n=4
+  prompts swing ±5-8pt across boots, only the 52-prompt mean is meaningful.)
+  Records: `tools/sparkbench-{epoch3-baseline,epoch3-ab,v3}-s18.json`.
+- **Trainer-space LR-0 diagnostic on an identical 520-row weak valset**
+  (`~/dspark-distill-data/prepared-weak-valset`, rows 4680-5199 of combined-v3):
+  epoch-3 **0.773/0.669** (pos-0/1) vs ckpt-v3 **0.778/0.680** → **+0.5pt** — the
+  fine-tune barely moved the trainer's OWN metric on the weak band, despite
+  on-policy data, correct masks (0.797), healthy trainer (GATE-1 0.832).
+- **⇒ This is the "val flat too" branch of the plan**: the weak band (creative/
+  chat/summarize prose) is intrinsic content entropy, not a trainable gap. Unlike
+  v2 (val +2.4pt, live flat = transfer gap), v3 shows there is NO SIGNAL to
+  transfer. Fork-native training (Phase 5) fixes metric transfer — it cannot
+  create signal. Its pre-approval condition (val-up-live-flat) did NOT occur.
+- **Three-round convergence:** v1 (familiar content) null, v2 (no-headroom
+  reasoning) null, v3 (the actual weak distribution, on-policy) null-to-negative.
+  **epoch-3 is at the practical ceiling of this draft on this target.**
+- Artifacts kept: `ckpt-v3` (worker, optimizer states deleted from v1/v2/v3 for
+  disk), `~/models/hf/GLM-5.2-speculator.v3` (both nodes, 7.6 GB each —
+  reclaimable), `prepared-weak-sub`/`prepared-combined-v3`/`prepared-weak-valset`,
+  `~/dspark-hs-weak` (90 GB, worker — the big reclaim candidate if wound down).
+  **Worker disk is at ~12 GB free — reclaim before any new work.**
+- Resting state: epoch-3 dspark K=2 §4b serving on :8000 (`~/serve-dspark-best.log`).
+
+## STATUS (2026-07-17, session 18 morning) — EFFORT REOPENED: Sparkulator v3 (Joe's call — goal: BEAT epoch-3 on overall sparkbench mean). Phase 1 (weak-band gen) RUNNING.
 
 Full plan: `~/.claude/plans/dazzling-seeking-steele.md` (approved). Win condition =
 beat stock epoch-3 on **mean tok/s AND tok/verify across the frozen 52-prompt
