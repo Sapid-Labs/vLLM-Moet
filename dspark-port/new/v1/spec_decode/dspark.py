@@ -115,6 +115,11 @@ class DSparkProposer(DFlashProposer):
     ):
         # Times the context-KV precompute (prime suspect for the per-step cost).
         if _DSPARK_PROFILE:
+            # Drain work already queued on the GPU (notably the previous step's
+            # verify forward) BEFORE starting the ctxkv timer. Without this the
+            # first _sync_ms of the step absorbs all outstanding async work and
+            # ctxkv reads ~360ms against an ~89ms cycle.
+            torch.cuda.synchronize()
             t0 = time.perf_counter()
             out = super().build_model_inputs_first_pass(
                 num_tokens, num_input_tokens, mm_embed_inputs

@@ -28,7 +28,12 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 )
 
 from .qwen3_dflash import DFlashQwen3ForCausalLM, DFlashQwen3Model
-from .utils import AutoWeightsLoader, maybe_prefix, process_eagle_weight
+from .utils import (
+    AutoWeightsLoader,
+    get_draft_quant_config,
+    maybe_prefix,
+    process_eagle_weight,
+)
 
 logger = init_logger(__name__)
 
@@ -133,9 +138,16 @@ class Qwen3DSparkForCausalLM(DFlashQwen3ForCausalLM):
         )
 
         logit_scale = getattr(self.config, "logit_scale", 1.0)
+        # lm_head is ~1.77 GiB of a 7.09 GiB BF16 checkpoint and IS read every
+        # draft step (full 154,880 draft vocab), so it is a third of the hot
+        # bytes. Pass the draft's quant config so a quantized checkpoint can
+        # shrink it too; compressed-tensors handles ParallelLMHead explicitly.
+        # Checkpoints that leave lm_head out of their config_groups (or list it
+        # under `ignore`) still load it dense, so this is backward compatible.
         self.lm_head = ParallelLMHead(
             self.config.draft_vocab_size,
             self.config.hidden_size,
+            quant_config=get_draft_quant_config(vllm_config),
             prefix=maybe_prefix(prefix, "lm_head"),
         )
         self.logits_processor = LogitsProcessor(
